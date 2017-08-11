@@ -9,7 +9,7 @@ class ComposePrompt:
     @commands.command()		
     async def composetest(self):
         """Test function. To be removed"""
-        await self.bot.say("Test function works!")
+        await self.bot.say("Test function works! Novanebula was here")
 		
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self):
@@ -49,7 +49,7 @@ class ComposePrompt:
     @commands.command(pass_context=True, no_pm=True)		
     async def setadmin(self):
         """Modify who can access admin commands for this bot on this server"""
-        await self.bot.say("setadmin function works!")	
+        await self.bot.say("setadmin function works!")
 		
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
