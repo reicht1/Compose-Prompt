@@ -1,11 +1,40 @@
+#Composeprompt.py, a cog to allow for the automation of weekly composition prompts
+# Written by Tyler Reich and Vincent Bryant
+
 import discord
 from discord.ext import commands
+import os
+from os import path
+from os import makedirs
+import json
+
+#global variables. To be treated as constants
+global dataPath 
+dataPath = "./data/composeprompt"
+
+#default values for JSON files
+global newPromptsList
+newPromptsList = {'prompts': []}
+global newPriPromptsList
+newPriPromptsList = {'priprompts': []}
+global newSettingsList
+newSettingsList = {'settings': {'promptrun': True, 'channel': '-1'}}
+global newGlobalSettingsList
+newGlobalSettingsList = {'globalsettings': {}}
 
 class ComposePrompt:
 	
     def __init__(self, bot):
         self.bot = bot
-
+        
+        #if dir for JSON files does not exist, make it
+        if not os.path.exists(dataPath):
+            os.makedirs(dataPath)
+        
+        if not os.path.exists(dataPath + '/globalsettings.txt'):
+            with open(dataPath + '/globalsettings.txt', 'w+') as file:
+                json.dump(newGlobalSettingsList, file, indent=4)
+            
     @commands.command()		
     async def composetest(self):
         """Test function. To be removed"""
@@ -37,14 +66,86 @@ class ComposePrompt:
         await self.bot.say("showentries function works!")
 
     @commands.command(pass_context=True, no_pm=True)		
-    async def prompton(self):
+    async def prompton(self, ctx):
         """Turn prompt mode on for this server"""
-        await self.bot.say("prompton function works!")	
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        channel = ctx.message.channel
+        channelSettings = newSettingsList
+        channelSettings['settings']['channel'] = channel.id
+        jsonInfo = {}
+        promptOn = False
+        message = "ERROR"
+        
+        #see if JSON data folder for server exists. If not, create it
+        if not os.path.exists(serverIDPath):
+            os.makedirs(serverIDPath)
+        
+        # see if prompts.txt for server exists. If not, create it
+        if not os.path.exists(serverIDPath + '/prompts.txt'):
+            with open(serverIDPath + '/prompts.txt', 'w+') as file:
+                json.dump(newPromptsList, file, indent=4)
+     
+        # see if priorityprompts.txt for server exists. If not, create it
+        if not os.path.exists(serverIDPath + '/priorityprompts.txt'):
+            with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
+                json.dump(newPriPromptsList, file, indent=4)
+                
+        # see if settings.txt for server exists. If not, create it
+        if not os.path.exists(serverIDPath + '/settings.txt'):
+            with open(serverIDPath + '/settings.txt', 'w+') as file:
+                json.dump(channelSettings, file, indent=4)
+            await self.bot.say("Composeprompt set to run in this channel.")    
+        else: #if it does exist, see if 'promptrun' is set to True. If not, set it to True
+            #get data from JSON file (and update what channel composeprompt is running in)
+            with open(serverIDPath + '/settings.txt', 'r') as file:
+                try:
+                    jsonInfo = json.load(file)
+                    jsonInfo['settings']['channel'] = channel.id
+                except ValueError:
+                    print("ERROR: Assigngamerole: Could not get values from JSON. Assuming list of servers to track is empty")
+            
+            #if promptrun is false, set it to true
+            if jsonInfo['settings']['promptrun']:
+                message = "Already running composeprompt in this server. Now running it in this channel."
+            else:
+                jsonInfo['settings']['promptrun'] = True
+                message = "Composeprompt set to run in this channel."
+            
+            with open(serverIDPath + '/settings.txt', 'w+') as file:
+                json.dump(jsonInfo, file, indent=4)
+            await self.bot.say(message)    
 
     @commands.command(pass_context=True, no_pm=True)	
-    async def promptoff(self):
+    async def promptoff(self, ctx):
         """Turn prompt mode off for this server"""
-        await self.bot.say("promptoff function works!")	
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        jsonInfo = {}
+        message = "ERROR"
+        
+        #check to see if settings.txt exists. if not, no need to turn promptrun setting off
+        if os.path.exists(serverIDPath + '/settings.txt'):
+            #get data from JSON file 
+            with open(serverIDPath + '/settings.txt', 'r') as file:
+                try:
+                    jsonInfo = json.load(file)
+                except ValueError:
+                    print("ERROR: Assigngamerole: Could not get values from JSON. Assuming list of servers to track is empty")
+            
+            #if promptrun is false, set it to true
+            if jsonInfo['settings']['promptrun']:
+                jsonInfo['settings']['promptrun'] = False
+                message = "Composeprompt is now off for this server."
+            else:
+                message = "Composeprompt is already off for this server."
+            
+            with open(serverIDPath + '/settings.txt', 'w+') as file:
+                json.dump(jsonInfo, file, indent=4)
+        else:
+            message = "Composeprompt is already off for this server."
+        
+        await self.bot.say(message)	
 
     @commands.command(pass_context=True, no_pm=True)		
     async def setadmin(self):
