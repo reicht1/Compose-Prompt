@@ -23,7 +23,7 @@ global newGlobalSettingsList
 newGlobalSettingsList = {'globalsettings': {}}
 
 class ComposePrompt:
-	
+
     def __init__(self, bot):
         self.bot = bot
         
@@ -39,17 +39,75 @@ class ComposePrompt:
     async def composetest(self):
         """Test function. To be removed"""
         await self.bot.say("Test function works! Novanebula was here")
-		
+
     @commands.command(pass_context=True, no_pm=True)		
-    async def newprompt(self):
+    async def newprompt(self, ctx, *, prompt : str):
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        promptAuthor = ctx.message.author
+        channel = ctx.message.channel
+        channelSettings = newSettingsList
+        jsonInfo = {}
+
         """Submit a new prompt."""
-        await self.bot.say("newprompt function works!")
+        ### 1. user inputs [p]newprompt [prompt goes here] (also error checking) ###
+        await self.bot.say("I think you wrote \"" + prompt + "\".") #for test
+
+        # ALLOW MAX PROMPT LENGTH TO BE SET BY ADMIN
+        if len(prompt) > 300:
+            await self.bot.say("Your prompt was over 300 characters. Prompts should be 300 characters or fewer.")
+            return
+
+        ### 2. if word filter is enabled, any words on filter list are removed from input ###
+
+        ### 3. string placed in dataPath + "/" + serverID + '/priorityprompts.txt' as a new prompt entry ###
+        # Are we allowed to do this in this server? Let's find out!
+        if os.path.exists(serverIDPath + '/settings.txt'):
+            with open(serverIDPath + '/settings.txt', 'r') as file:
+                try:
+                    jsonInfo = json.load(file)
+                    if not jsonInfo['settings']['promptrun']:
+                        await self.bot.say("ERROR: Composeprompt is not running in this server.")
+                        return
+                    elif jsonInfo['settings']['channel'] != channel.id:
+                        await self.bot.say("ERROR: Composeprompt is not running in this channel.") # Should bot say anything?
+                        return
+                    else:
+                        await self.bot.say("IF PLANTS WORE PANTS WOULD THEY WEAR THEM LIKE THIS [img01.jpg] OR THIS [img02.jpg]???")
+                except ValueError:
+                    print("ERROR: Composeprompt is not running in this server.") # Should bot say anything?
+                    return
+
+        # Now, open the filepath to prompts.txt and add the prompts.
+        promptsList = [] # set up new list
+        with open(serverIDPath + '/prompts.txt', 'r') as promptFile:
+            try:
+                jsonPrompts = json.load(promptFile)
+                await self.bot.say("...loaded from json file...") # for test
+                promptsList = jsonPrompts['prompts']
+            except ValueError:
+                await self.bot.say("IF PANTS WORE PANTS AM I HIGH??????")
+                # I guess the array didn't exist in the prompts.txt file or something.
+                return
+
+        with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
+            await self.bot.say("...assigned jsonPrompts to promptsList...") # for test
+            newPrompt = {'prompt': prompt, 'author': ctx.message.author.id} # set prompt as dictionary
+            await self.bot.say("...created new prompt dictionary...") # for test
+            promptsList.append(newPrompt) # append new prompt to current list of prompts
+            await self.bot.say("...appended new prompt dictionary to promptsList...") # for test
+            print(str(promptsList))
+            json.dump({'prompts': promptsList}, promptFile, indent=4) #rewrite prompts.txt with updated list of prompts
+            await self.bot.say("...and rewrote prompts list!")
+
+
+        await self.bot.say("newprompt function ended!") #for test
 
     @commands.command(pass_context=True, no_pm=True)		
     async def entrysubmit(self):
         """Submit an entry for this week's prompt."""
         await self.bot.say("entrysubmit function works!")
-		
+
     @commands.command(pass_context=True, no_pm=True)		
     async def setpromptstart(self):
         """Set the time when a prompt period begins and ends"""
@@ -151,6 +209,6 @@ class ComposePrompt:
     async def setadmin(self):
         """Modify who can access admin commands for this bot on this server"""
         await self.bot.say("setadmin function works!")
-		
+
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
