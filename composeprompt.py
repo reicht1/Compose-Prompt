@@ -7,6 +7,7 @@ import os
 from os import path
 from os import makedirs
 import json
+from cogs.utils import checks
 
 #global variables. To be treated as constants
 global dataPath 
@@ -21,6 +22,8 @@ global newSettingsList
 newSettingsList = {'settings': {'promptrun': True, 'channel': '-1'}}
 global newGlobalSettingsList
 newGlobalSettingsList = {'globalsettings': {}}
+global newEntriesList
+newEntriesList = {'entries': []}
 
 class ComposePrompt:
 
@@ -51,7 +54,7 @@ class ComposePrompt:
 
         """Submit a new prompt."""
         ### 1. user inputs [p]newprompt [prompt goes here] (also error checking) ###
-        await self.bot.say("I think you wrote \"" + prompt + "\".") #for test
+        #await self.bot.say("I think you wrote \"" + prompt + "\".") #for test
 
         # ALLOW MAX PROMPT LENGTH TO BE SET BY ADMIN
         if len(prompt) > 300:
@@ -70,10 +73,8 @@ class ComposePrompt:
                         await self.bot.say("ERROR: Composeprompt is not running in this server.")
                         return
                     elif jsonInfo['settings']['channel'] != channel.id:
-                        await self.bot.say("ERROR: Composeprompt is not running in this channel.") # Should bot say anything?
+                        await self.bot.say("ERROR: This is not the correct channel for submitting prompts.") # Should bot say anything?
                         return
-                    else:
-                        await self.bot.say("IF PLANTS WORE PANTS WOULD THEY WEAR THEM LIKE THIS [img01.jpg] OR THIS [img02.jpg]???")
                 except ValueError:
                     print("ERROR: Composeprompt is not running in this server.") # Should bot say anything?
                     return
@@ -83,39 +84,77 @@ class ComposePrompt:
         with open(serverIDPath + '/prompts.txt', 'r') as promptFile:
             try:
                 jsonPrompts = json.load(promptFile)
-                await self.bot.say("...loaded from json file...") # for test
                 promptsList = jsonPrompts['prompts']
             except ValueError:
-                await self.bot.say("IF PANTS WORE PANTS AM I HIGH??????")
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
                 # I guess the array didn't exist in the prompts.txt file or something.
                 return
 
+        newPrompt = {'prompt': prompt, 'author': ctx.message.author.id} # set prompt as dictionary
+        promptsList.append(newPrompt) # append new prompt to current list of prompts 
+               
         with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
-            await self.bot.say("...assigned jsonPrompts to promptsList...") # for test
-            newPrompt = {'prompt': prompt, 'author': ctx.message.author.id} # set prompt as dictionary
-            await self.bot.say("...created new prompt dictionary...") # for test
-            promptsList.append(newPrompt) # append new prompt to current list of prompts
-            await self.bot.say("...appended new prompt dictionary to promptsList...") # for test
-            print(str(promptsList))
             json.dump({'prompts': promptsList}, promptFile, indent=4) #rewrite prompts.txt with updated list of prompts
-            await self.bot.say("...and rewrote prompts list!")
 
-
-        await self.bot.say("newprompt function ended!") #for test
+        #await self.bot.say("newprompt function ended!") #for test
 
     @commands.command(pass_context=True, no_pm=True)		
-    async def entrysubmit(self):
+    async def entrysubmit(self, ctx, *, entry : str):
         """Submit an entry for this week's prompt."""
-        await self.bot.say("entrysubmit function works!")
+        
+        entryAuthor = ctx.message.author
+        jsonEntries = newEntriesList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        entriesList = []
+        
+        #get list of existing entries
+        with open(serverIDPath + '/entries.txt', 'r') as file:
+            try:
+                jsonEntries = json.load(file)
+                entriesList = jsonEntries['entries']
+            except ValueError: #I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+        
+        #append new entry to list of entries
+        entriesList.append({'entry': entry, 'author': serverID})
+        
+        #overwrite file with new list
+        with open(serverIDPath + '/entries.txt', 'w+') as file:
+            json.dump({'entries': entriesList}, file, indent=4)
+        
+        await self.bot.say("Entry submitted!")
 
     @commands.command(pass_context=True, no_pm=True)		
     async def setpromptstart(self):
         """Set the time when a prompt period begins and ends"""
         await self.bot.say("setpromptstart function works!")
 
+    @checks.admin_or_permissions(manage_roles=True)
     @commands.command(pass_context=True, no_pm=True)		
-    async def priprompt(self):
+    async def priprompt(self, ctx, *, entry : str):
         """Create a priority prompt"""
+        entryAuthor = ctx.message.author
+        jsonPriPrompts = newPriPromptsList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        priPromptsList = []
+        
+        #get list of existing priority prompts
+        with open(serverIDPath + '/priorityprompts.txt', 'r') as file:
+            try:
+                jsonPriPrompts = json.load(file)
+                priPromptsList = jsonPriPrompts['priprompts']
+            except ValueError: #I guess the array didn't exist in the priorityprompts.txt file or something.
+                print("ERROR: Composeprompt: [p]priprompt: Could not get data from JSON file!")
+        
+        #append new entry to list of entries
+        priPromptsList.append({'prompt': entry, 'author': serverID})
+        
+        #overwrite file with new list
+        with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
+            json.dump({'priprompts': priPromptsList}, file, indent=4)
+        
         await self.bot.say("priprompt function works!")
 
     @commands.command(pass_context=True, no_pm=True)		
@@ -148,6 +187,11 @@ class ComposePrompt:
         if not os.path.exists(serverIDPath + '/priorityprompts.txt'):
             with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
                 json.dump(newPriPromptsList, file, indent=4)
+                
+        # see if entries.txt for server exists. If not, create it
+        if not os.path.exists(serverIDPath + '/entries.txt'):
+            with open(serverIDPath + '/entries.txt', 'w+') as file:
+                json.dump(newEntriesList, file, indent=4)
                 
         # see if settings.txt for server exists. If not, create it
         if not os.path.exists(serverIDPath + '/settings.txt'):
