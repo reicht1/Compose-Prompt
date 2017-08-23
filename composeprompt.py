@@ -24,6 +24,8 @@ global newGlobalSettingsList
 newGlobalSettingsList = {'globalsettings': {}}
 global newEntriesList
 newEntriesList = {'entries': []}
+global newDomainWhitelist
+newDomainWhitelist = {'whitelist': []}
 
 class ComposePrompt:
 
@@ -192,6 +194,11 @@ class ComposePrompt:
         if not os.path.exists(serverIDPath + '/entries.txt'):
             with open(serverIDPath + '/entries.txt', 'w+') as file:
                 json.dump(newEntriesList, file, indent=4)
+
+        # see if whitelist.txt for server exists. If not, create it
+        if not os.path.exists(serverIDPath + '/whitelist.txt'):
+            with open(serverIDPath + '/whitelist.txt', 'w+') as file:
+                json.dump(newDomainWhitelist, file, indent=4)
                 
         # see if settings.txt for server exists. If not, create it
         if not os.path.exists(serverIDPath + '/settings.txt'):
@@ -247,9 +254,98 @@ class ComposePrompt:
         else:
             message = "Composeprompt is already off for this server."
         
-        await self.bot.say(message)	
+        await self.bot.say(message)
 
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)
+    async def viewdomains(self, ctx):
+        """View domain names on the whitelist stored by this bot"""
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+
+        # get list of existing items on whitelist
+        with open(serverIDPath + '/whitelist.txt', 'r') as file:
+            try:
+                jsonWhitelist = json.load(file)
+                whitelist = jsonWhitelist['whitelist']
+            except ValueError:  # I guess the array didn't exist in the whitelist.txt file?
+                print("ERROR: Composeprompt: [p]adddomain: Could not get data from JSON file!")
+
+        whitelistString = ""
+
+        for domain in whitelist:
+            whitelistString += "- " + domain + "\n"
+
+        if len(whitelistString) == 0:
+            whitelistString = "- no domains here!"
+
+        await self.bot.say("Domains whitelisted:\n" + whitelistString)
+
+    @commands.command(pass_context=True, no_pm=True)
+    async def adddomain(self, ctx, domain : str):
+        """Add a domain name to the whitelist stored by this bot. Admin-only."""
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        domain = domain.lower() # make domain lowercase
+
+        # get list of existing items on whitelist
+        with open(serverIDPath + '/whitelist.txt', 'r') as file:
+            try:
+                jsonWhitelist = json.load(file)
+                whitelist = jsonWhitelist['whitelist']
+            except ValueError:  # I guess the array didn't exist in the whitelist.txt file?
+                print("ERROR: Composeprompt: [p]adddomain: Could not get data from JSON file!")
+
+        # check if domain name is already on whitelist
+        # if not, append new domain name to whitelist
+        if domain in whitelist:
+            await self.bot.say("Domain \"" + domain + "\" is already in whitelist!")
+            return
+        else:
+            whitelist.append(domain)
+
+        # overwrite file with updated whitelist
+        with open(serverIDPath + '/whitelist.txt', 'w+') as file:
+            json.dump({'whitelist': whitelist}, file, indent=4)
+
+        with open(serverIDPath + '/whitelist.txt', 'r') as file:
+            try:
+                jsonWhitelist = json.load(file)
+                whitelist = jsonWhitelist['whitelist']
+                latest = whitelist[len(whitelist) - 1]
+                await self.bot.say("I think you just submitted the domain \"" + latest + "\".")
+            except ValueError:
+                await self.bot.say("I am:\n⚪ a success message\n⚪ an error message\n🔘 in a relationship, stop staring")
+
+        await self.bot.say("adddomain function works! (I think.)")
+
+    @commands.command(pass_context=True, no_pm=True)
+    async def removedomain(self, ctx, domain : str):
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        domain = domain.lower() # make domain lowercase
+
+        # get list of existing items on whitelist
+        with open(serverIDPath + '/whitelist.txt', 'r') as file:
+            try:
+                jsonWhitelist = json.load(file)
+                whitelist = jsonWhitelist['whitelist']
+            except ValueError:  # I guess the array didn't exist in the whitelist.txt file?
+                print("ERROR: Composeprompt: [p]addtowhitelist: Could not get data from JSON file!")
+
+        # find domain name in whitelist and remove it
+        if domain in whitelist:
+            whitelist.remove(domain)
+        else:
+            await self.bot.say("\"" + domain + "\" was not in whitelist.")
+            return
+
+        # overwrite file with updated whitelist
+        with open(serverIDPath + '/whitelist.txt', 'w+') as file:
+            json.dump({'whitelist': whitelist}, file, indent=4)
+
+        await self.bot.say("removedomain function\n⚪ doesn't work\n⚪ works!\n🔘 has haunted my waking hours for months now")
+
+    @commands.command(pass_context=True, no_pm=True)
     async def setadmin(self):
         """Modify who can access admin commands for this bot on this server"""
         await self.bot.say("setadmin function works!")
