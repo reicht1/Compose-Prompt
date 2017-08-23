@@ -39,11 +39,6 @@ class ComposePrompt:
         if not os.path.exists(dataPath + '/globalsettings.txt'):
             with open(dataPath + '/globalsettings.txt', 'w+') as file:
                 json.dump(newGlobalSettingsList, file, indent=4)
-            
-    @commands.command()		
-    async def composetest(self):
-        """Test function. To be removed"""
-        await self.bot.say("Test function works! Novanebula was here")
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
@@ -119,7 +114,7 @@ class ComposePrompt:
                 print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
         
         #append new entry to list of entries
-        entriesList.append({'entry': entry, 'author': serverID})
+        entriesList.append({'entry': entry, 'author': entryAuthor.id})
         
         #overwrite file with new list
         with open(serverIDPath + '/entries.txt', 'w+') as file:
@@ -159,10 +154,36 @@ class ComposePrompt:
         
         await self.bot.say("priprompt function works!")
 
-    @commands.command(pass_context=True, no_pm=True)		
-    async def showentries(self):
+    @commands.command(pass_context=True, no_pm=True)
+    async def showentries(self, ctx):
         """Show all entries submitted for this week's prompt so far!"""
-        await self.bot.say("showentries function works!")
+
+        entryAuthor = ctx.message.author
+        jsonEntries = newEntriesList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        entriesList = []
+
+        # get list of existing entries
+        with open(serverIDPath + '/entries.txt', 'r') as file:
+            try:
+                jsonEntries = json.load(file)
+                entriesList = jsonEntries['entries']
+            except ValueError:  # I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+
+        # send list of entries via PM to requesting user
+        messageText = ""
+        for entry in entriesList:
+            messageText += "\n- " + (await self.bot.get_user_info(entry['author'])).name + ": " + entry['entry']
+
+        if len(messageText) == 0:
+            messageText = "\n- No entries yet! Get working!"
+
+        messageText = "List of entries:" + messageText
+
+        await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+
 
     @commands.command(pass_context=True, no_pm=True)		
     async def prompton(self, ctx):
