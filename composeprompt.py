@@ -8,6 +8,10 @@ from os import path
 from os import makedirs
 import json
 from cogs.utils import checks
+import sched
+import time
+import _thread
+import re
 
 #global variables. To be treated as constants
 global dataPath 
@@ -21,7 +25,7 @@ newPriPromptsList = {'priprompts': []}
 global newSettingsList
 newSettingsList = {'settings': {'promptrun': True, 'channel': '-1'}}
 global newGlobalSettingsList
-newGlobalSettingsList = {'globalsettings': {}}
+newGlobalSettingsList = {'globalsettings': {'promptstarttimes': {}}}
 global newEntriesList
 newEntriesList = {'entries': []}
 global newDomainWhitelist
@@ -31,6 +35,9 @@ class ComposePrompt:
 
     def __init__(self, bot):
         self.bot = bot
+        
+        #test code for testing the scheduler library
+        _thread.start_new_thread(self.scheduletest, ())
         
         #if dir for JSON files does not exist, make it
         if not os.path.exists(dataPath):
@@ -42,6 +49,7 @@ class ComposePrompt:
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
+        """Submit a new prompt."""
         serverID = ctx.message.server.id
         serverIDPath = dataPath + "/" + serverID
         promptAuthor = ctx.message.author
@@ -49,7 +57,7 @@ class ComposePrompt:
         channelSettings = newSettingsList
         jsonInfo = {}
 
-        """Submit a new prompt."""
+
         ### 1. user inputs [p]newprompt [prompt goes here] (also error checking) ###
         #await self.bot.say("I think you wrote \"" + prompt + "\".") #for test
 
@@ -93,8 +101,6 @@ class ComposePrompt:
         with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
             json.dump({'prompts': promptsList}, promptFile, indent=4) #rewrite prompts.txt with updated list of prompts
 
-        #await self.bot.say("newprompt function ended!") #for test
-
     @commands.command(pass_context=True, no_pm=True)		
     async def entrysubmit(self, ctx, *, entry : str):
         """Submit an entry for this week's prompt."""
@@ -122,12 +128,28 @@ class ComposePrompt:
         
         await self.bot.say("Entry submitted!")
 
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
-    async def setpromptstart(self):
+    async def setpromptstart(self, ctx, *, time : str):
         """Set the time when a prompt period begins and ends"""
-        await self.bot.say("setpromptstart function works!")
+        #regular expression for imput format should be:
+        regEx = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday) (1?[0-9]:[0-5][0-9] [a|p]m)"
+        result = re.search(regEx, time.lower())
+        newTime = ""
+        
+        #if the expected format of the time was not found, do 
+        if (result is None):
+            await self.bot.say("Could not find a time of the week\nPlease input in the format of <Day of the week> <Hour>:<Minute> <AM/PM>\nExample: Friday 5:00 PM")
+            return
+        
+        newTime = result.group(0)
+        await self.bot.say("Prompt reset time set to " + result.group(0))
 
-    @checks.admin_or_permissions(manage_roles=True)
+        #FIXME: convert text to integer time
+        
+        #FIXME: add time to current scheduler
+        
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
     async def priprompt(self, ctx, *, entry : str):
         """Create a priority prompt"""
@@ -184,7 +206,7 @@ class ComposePrompt:
 
         await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
 
-
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
     async def prompton(self, ctx):
         """Turn prompt mode on for this server"""
@@ -246,6 +268,7 @@ class ComposePrompt:
                 json.dump(jsonInfo, file, indent=4)
             await self.bot.say(message)    
 
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)	
     async def promptoff(self, ctx):
         """Turn prompt mode off for this server"""
@@ -301,6 +324,7 @@ class ComposePrompt:
 
         await self.bot.say("Domains whitelisted:\n" + whitelistString)
 
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
     async def adddomain(self, ctx, domain : str):
         """Add a domain name to the whitelist stored by this bot. Admin-only."""
@@ -339,6 +363,7 @@ class ComposePrompt:
 
         await self.bot.say("adddomain function works! (I think.)")
 
+    @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
     async def removedomain(self, ctx, domain : str):
         serverID = ctx.message.server.id
@@ -365,11 +390,18 @@ class ComposePrompt:
             json.dump({'whitelist': whitelist}, file, indent=4)
 
         await self.bot.say("removedomain function\n⚪ doesn't work\n⚪ works!\n🔘 has haunted my waking hours for months now")
-
-    @commands.command(pass_context=True, no_pm=True)
-    async def setadmin(self):
-        """Modify who can access admin commands for this bot on this server"""
-        await self.bot.say("setadmin function works!")
-
+      
+    #test function for testing the scheduler library
+    def testfunction(self, args : str):
+        print("Test function called, it said ", str(args))
+        
+    #test function for testing the scheduler library
+    def scheduletest(self):
+        scheduler = sched.scheduler(time.time, time.sleep)
+        currentTime = time.mktime(time.localtime()) + 5
+        oneString = "test worked!"
+        scheduler.enter(5, 1, self.testfunction, (oneString,))
+        scheduler.run()
+    
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
