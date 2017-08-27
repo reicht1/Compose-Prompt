@@ -9,9 +9,10 @@ from os import makedirs
 import json
 from cogs.utils import checks
 import sched
-import time
 import _thread
 import re
+import time
+from time import ctime
 
 #global variables. To be treated as constants
 global dataPath 
@@ -33,12 +34,11 @@ newDomainWhitelist = {'whitelist': []}
 
 class ComposePrompt:
 
+    scheduler = sched.scheduler(time.time, time.sleep)
+
     def __init__(self, bot):
         self.bot = bot
-        
-        #test code for testing the scheduler library
-        _thread.start_new_thread(self.scheduletest, ())
-        
+
         #if dir for JSON files does not exist, make it
         if not os.path.exists(dataPath):
             os.makedirs(dataPath)
@@ -46,6 +46,8 @@ class ComposePrompt:
         if not os.path.exists(dataPath + '/globalsettings.txt'):
             with open(dataPath + '/globalsettings.txt', 'w+') as file:
                 json.dump(newGlobalSettingsList, file, indent=4)
+                
+        #FIXME: load scheduler from globalsettings.txt
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
@@ -130,24 +132,43 @@ class ComposePrompt:
 
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
-    async def setpromptstart(self, ctx, *, time : str):
-        """Set the time when a prompt period begins and ends"""
+    async def setpromptstart(self, ctx, *, promptTime : str):
+        """Set the prompt time when a prompt period begins and ends"""
         #regular expression for imput format should be:
-        regEx = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday) (1?[0-9]:[0-5][0-9] [a|p]m)"
-        result = re.search(regEx, time.lower())
+        serverID = ctx.message.server.id
+        regEx = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday) (1[0-2]|[1-9]):([0-5][0-9]) ([ap]m)"
+        result = re.search(regEx, promptTime.lower())
         newTime = ""
+        globalSettings = newGlobalSettingsList
+        schedulerTime = 0
         
-        #if the expected format of the time was not found, do 
+        #if the expected format of the prompt time was not found, exit this function
         if (result is None):
             await self.bot.say("Could not find a time of the week\nPlease input in the format of <Day of the week> <Hour>:<Minute> <AM/PM>\nExample: Friday 5:00 PM")
             return
         
+        with open(dataPath + "/globalsettings.txt", "r") as settingsFile:
+            try:
+                globalSettings = json.load(settingsFile)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: [p]newprompt: Could not get data from globalsettings.txt JSON file!")
+                return
+                
         newTime = result.group(0)
-        await self.bot.say("Prompt reset time set to " + result.group(0))
-
-        #FIXME: convert text to integer time
+        globalSettings["globalsettings"]["promptstarttimes"][serverID] = newTime
+            
+        with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
+            json.dump(globalSettings, settingsFile, indent=4)
         
-        #FIXME: add time to current scheduler
+        await self.bot.say("Prompt reset time set to " + newTime)
+        await self.bot.say("Converted to " +  str(self.convertToSchedulerTime(newTime)) + " which means " + time.ctime(int(self.convertToSchedulerTime(newTime))))
+
+        schedulerTime = int(self.convertToSchedulerTime(newTime))
+        
+        self.scheduler.enterabs(schedulerTime, 1, self.testfunction, (" test called from setpromptstart!",))
+        _thread.start_new_thread(self.scheduler.run, ())
+
+        #FIXME: cancel previously loaded events for this server, so that the server doesn't have two prompt reset times
         
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
@@ -397,11 +418,75 @@ class ComposePrompt:
         
     #test function for testing the scheduler library
     def scheduletest(self):
-        scheduler = sched.scheduler(time.time, time.sleep)
         currentTime = time.mktime(time.localtime()) + 5
         oneString = "test worked!"
-        scheduler.enter(5, 1, self.testfunction, (oneString,))
-        scheduler.run()
+        self.scheduler.enter(5, 1, self.testfunction, (oneString,))
+        self.scheduler.run()
+        
+    #turn human readable time into a time readable by the scheduler
+    def convertToSchedulerTime(self, humanTime : str):
+        currentTime = time.localtime()
+        year = currentTime.tm_year
+        month = currentTime.tm_mon
+        dayOfMonth = currentTime.tm_mday
+        dayOfWeek = -1
+        dayOfYear = currentTime.tm_yday
+        hour = -1
+        minute = -1
+        pm = False
+    
+        #get different elements of the string, and convert it to a number
+        #group 0 = entire match
+        #group 1 = day of the week
+        #group 2 = hour
+        #group 3 = minute
+        #group 4 = am or pm
+        regEx = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday) (1[0-2]|[1-9]):([0-5][0-9]) ([ap]m)"
+        result = re.search(regEx, humanTime)
+        
+        #convert day of the week to a number
+        if result.group(1) == 'monday':
+            dayOfWeek = 0
+        elif result.group(1) == 'tuesday':
+            dayOfWeek = 1
+        elif result.group(1) == 'wednesday':
+            dayOfWeek = 2
+        elif result.group(1) == 'thursday':
+            dayOfWeek = 3
+        elif result.group(1) == 'friday':
+            dayOfWeek = 4
+        elif result.group(1) == 'saturday':
+            dayOfWeek = 5
+        elif result.group(1) == 'sunday':
+            dayOfWeek = 6
+        else:
+            dayOfWeek = "ERROR"
+        
+        #convert hour into a number used by the time_struct
+        if result.group(4) == 'pm':
+            pm = True
+        else:
+            pm = False
+        
+        if result.group(2) == '12':
+            if pm:
+                hour = 12
+            else:
+                hour = 0
+        else:
+            if pm:
+                hour = int(result.group(2)) + 12
+            else:
+                hour = int(result.group(2)) 
+
+        #get the minute for time_struct
+        minute = int(result.group(3))
+        
+        #FIXME adjust year month, and dayOfYear as needed to the next occuring instance of the time given by the user
+        
+        resultTime = (year, month, dayOfMonth, hour, minute, 0, dayOfWeek, dayOfYear, -1)
+        
+        return time.mktime(resultTime)
     
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
