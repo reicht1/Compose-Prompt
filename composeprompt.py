@@ -1,6 +1,7 @@
 #Composeprompt.py, a cog to allow for the automation of weekly composition prompts
 # Written by Tyler Reich and Vincent Bryant
 
+import asyncio
 import discord
 from discord.ext import commands
 import os
@@ -13,6 +14,9 @@ import _thread
 import re
 import time
 from time import ctime
+from datetime import datetime
+from datetime import timedelta
+import threading
 
 #global variables. To be treated as constants
 global dataPath 
@@ -34,7 +38,7 @@ newDomainWhitelist = {'whitelist': []}
 
 class ComposePrompt:
 
-    scheduler = sched.scheduler(time.time, time.sleep)
+    currentTimers = {}
 
     def __init__(self, bot):
         self.bot = bot
@@ -47,7 +51,7 @@ class ComposePrompt:
             with open(dataPath + '/globalsettings.txt', 'w+') as file:
                 json.dump(newGlobalSettingsList, file, indent=4)
                 
-        #FIXME: load scheduler from globalsettings.txt
+        #FIXME: load timer from globalsettings.txt
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
@@ -160,14 +164,13 @@ class ComposePrompt:
         with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
             json.dump(globalSettings, settingsFile, indent=4)
         
+        schedulerTime = int(self.convertToSchedulerTime(newTime))    
+        #FIXME threading.Timer can't run async fucntions
+        #threading.Timer(schedulerTime, self.testfunction, [" test called from setpromptstart!",]).start()
+        threading.Timer(schedulerTime, self.runAsync, [ctx.message.channel,]).start()
+        #threading.Thread(schedulerTime, self.runAsync, [ctx.message.channel,]).start()
         await self.bot.say("Prompt reset time set to " + newTime)
-        await self.bot.say("Converted to " +  str(self.convertToSchedulerTime(newTime)) + " which means " + time.ctime(int(self.convertToSchedulerTime(newTime))))
-
-        schedulerTime = int(self.convertToSchedulerTime(newTime))
         
-        self.scheduler.enterabs(schedulerTime, 1, self.testfunction, (" test called from setpromptstart!",))
-        _thread.start_new_thread(self.scheduler.run, ())
-
         #FIXME: cancel previously loaded events for this server, so that the server doesn't have two prompt reset times
         
     @checks.admin()
@@ -413,24 +416,12 @@ class ComposePrompt:
         await self.bot.say("removedomain function\n⚪ doesn't work\n⚪ works!\n🔘 has haunted my waking hours for months now")
       
     #test function for testing the scheduler library
-    def testfunction(self, args : str):
+    async def testfunction(self, args : str):
         print("Test function called, it said ", str(args))
         
-    #test function for testing the scheduler library
-    def scheduletest(self):
-        currentTime = time.mktime(time.localtime()) + 5
-        oneString = "test worked!"
-        self.scheduler.enter(5, 1, self.testfunction, (oneString,))
-        self.scheduler.run()
-        
-    #turn human readable time into a time readable by the scheduler
+    #turn human readable time into a time readable by the timer
     def convertToSchedulerTime(self, humanTime : str):
-        currentTime = time.localtime()
-        year = currentTime.tm_year
-        month = currentTime.tm_mon
-        dayOfMonth = currentTime.tm_mday
         dayOfWeek = -1
-        dayOfYear = currentTime.tm_yday
         hour = -1
         minute = -1
         pm = False
@@ -482,11 +473,46 @@ class ComposePrompt:
         #get the minute for time_struct
         minute = int(result.group(3))
         
-        #FIXME adjust year month, and dayOfYear as needed to the next occuring instance of the time given by the user
+        #get the time right now, and get datetime object of when prompt switches
+        nowTime = datetime.today()
+        endTime = datetime(year = nowTime.year, month = nowTime.month, day = nowTime.day, hour = hour, minute = minute, second = 0)
         
-        resultTime = (year, month, dayOfMonth, hour, minute, 0, dayOfWeek, dayOfYear, -1)
+        if (dayOfWeek == nowTime.weekday()) and (hour > nowTime.hour or (hour == nowTime.hour and minute > nowTime.minute)):
+            print("should be set for today!")
+        else:
+            #print("days should have been increased")
+            endTime = endTime + timedelta(days = 7)
         
-        return time.mktime(resultTime)
+        #get difference between now and when the prompt switches
+        secondsResult = (endTime - nowTime).total_seconds()
+        
+        #returns seconds left until reset time
+        return secondsResult
+    
+    # hopefully we can get rid of this middleman function
+    def runAsync(self, serverID):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.promptRestart(serverID))
+        #asyncio.ensure_future(promptRestart(serverID))
+        print("done with runAsync")
+    
+    
+    #print out existing entries (if they exist) and 
+    async def promptRestart(self, serverID):
+        #message = threading.Thread(target = self.bot.send_message, args = (serverID, 'function called!',))
+        #message = threading.Thread(target = self.testfunction, args = ("called async function!",))
+        #message.start()
+        #message.join()
+        
+        #loop = asyncio.new_event_loop()
+        #asyncio.set_event_loop(loop)
+        
+        #loop = asyncio.get_event_loop()
+        await self.bot.send_message(serverID, 'function called!')
+        
+        print("ran async function")
     
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
