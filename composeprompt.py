@@ -17,6 +17,7 @@ from time import ctime
 from datetime import datetime
 from datetime import timedelta
 import threading
+from random import randint
 
 #global variables. To be treated as constants
 global dataPath 
@@ -177,7 +178,7 @@ class ComposePrompt:
     @commands.command(pass_context=True, no_pm=True)		
     async def priprompt(self, ctx, *, entry : str):
         """Create a priority prompt"""
-        entryAuthor = ctx.message.author
+        entryAuthor = ctx.message.author.id
         jsonPriPrompts = newPriPromptsList
         serverID = ctx.message.server.id
         serverIDPath = dataPath + "/" + serverID
@@ -192,7 +193,7 @@ class ComposePrompt:
                 print("ERROR: Composeprompt: [p]priprompt: Could not get data from JSON file!")
         
         #append new entry to list of entries
-        priPromptsList.append({'prompt': entry, 'author': serverID})
+        priPromptsList.append({'prompt': entry, 'author': entryAuthor})
         
         #overwrite file with new list
         with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
@@ -279,7 +280,8 @@ class ComposePrompt:
                     jsonInfo = json.load(file)
                     jsonInfo['settings']['channel'] = channel.id
                 except ValueError:
-                    print("ERROR: Assigngamerole: Could not get values from JSON. Assuming list of servers to track is empty")
+                    print("ERROR: Composeprompt: prompton Could not get values from JSON.")
+                    return
             
             #if promptrun is false, set it to true
             if jsonInfo['settings']['promptrun']:
@@ -488,31 +490,88 @@ class ComposePrompt:
         
         #returns seconds left until reset time
         return secondsResult
-    
+   
+    @checks.admin()
+    @commands.command(pass_context=True, no_pm=True)
+    async def testCommand(self, ctx):
+        await self.promptRestart(ctx.message.server.id)
+   
     # hopefully we can get rid of this middleman function
     def runAsync(self, serverID):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self.promptRestart(serverID))
-        #asyncio.ensure_future(promptRestart(serverID))
         print("done with runAsync")
     
     
     #print out existing entries (if they exist) and 
     async def promptRestart(self, serverID):
-        #message = threading.Thread(target = self.bot.send_message, args = (serverID, 'function called!',))
-        #message = threading.Thread(target = self.testfunction, args = ("called async function!",))
-        #message.start()
-        #message.join()
         
-        #loop = asyncio.new_event_loop()
-        #asyncio.set_event_loop(loop)
+        serverIDPath = dataPath + "/" + serverID
+        channel = -1
+        prompts = []
+        priPrompts = []
+        promptToUse = {}
         
-        #loop = asyncio.get_event_loop()
-        await self.bot.send_message(serverID, 'function called!')
+        #get settings information from JSON file
+        with open(serverIDPath + '/settings.txt', 'r') as file:
+            try:
+                settings = json.load(file)
+                settings = settings['settings']
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from globalsettings.txt JSON file!")
+                return
+       
+        #check to see if composeprompt is supposed to be running in this server
+        if "promptrun" in settings:
+            if settings["promptrun"] is False:
+                return
+        else:
+            return
+       
+        #get which channel composeprompt should run in for this server
+        if "channel" in settings:
+            channel = settings["channel"]
+        else:
+            channel = self.bot.get_server(serverID)
+            await self.bot.send_message(channel, 'Error. Bot does not have channel to run in. Using default channel')    
         
-        print("ran async function")
+        #FIXME get entries and print them out.
+        
+        #see if there are any priority prompts
+        with open(serverIDPath + '/priorityprompts.txt', 'r') as file:    
+            try:
+                priPrompts = json.load(file)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                return
+        
+        #see if priority list is empty. If it has stuff in it, use that first. Else, use regular prompts
+        if len(priPrompts["priprompts"]) > 0:
+            promptToUse = priPrompts["priprompts"][0]
+            priPrompts["priprompts"].pop(0)
+
+            with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
+                json.dump({"priprompts": priPrompts["priprompts"]}, file, indent=4)
+              
+        else:
+            #get new prompt from regular prompts
+            with open(serverIDPath + '/prompts.txt', 'r') as file:    
+                try:
+                    prompts = json.load(file)
+                except ValueError:
+                    await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                    return
+            
+            index = randint(0, len(prompts["prompts"]) - 1)
+            promptToUse = prompts["prompts"][index]
+            
+        
+        #print out new prompt
+        userMention = await self.bot.get_user_info(promptToUse["author"])       
+        await self.bot.send_message(self.bot.get_channel(channel), promptToUse["prompt"] + "\n submitted by " + userMention.mention)
+        #FIXME save prompt somewhere
     
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
