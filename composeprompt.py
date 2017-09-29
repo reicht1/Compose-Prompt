@@ -168,11 +168,8 @@ class ComposePrompt:
         with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
             json.dump(globalSettings, settingsFile, indent=4)
         
-        schedulerTime = int(self.convertToSchedulerTime(newTime))    
-        #FIXME threading.Timer can't run async fucntions
-        #threading.Timer(schedulerTime, self.testfunction, [" test called from setpromptstart!",]).start()
-        threading.Timer(schedulerTime, self.runAsync, [ctx.message.channel,]).start()
-        #threading.Thread(schedulerTime, self.runAsync, [ctx.message.channel,]).start()
+        schedulerTime = int(self.convertToSchedulerTime(newTime))
+        threading.Timer(schedulerTime, self.runAsync, [ctx.message.server.id,]).start()
         await self.bot.say("Prompt reset time set to " + newTime)
         
         #FIXME: cancel previously loaded events for this server, so that the server doesn't have two prompt reset times
@@ -499,20 +496,16 @@ class ComposePrompt:
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
     async def testCommand(self, ctx):
-        await self.promptRestart(ctx.message.server.id)
+        asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
    
     # hopefully we can get rid of this middleman function
     def runAsync(self, serverID):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.promptRestart(serverID))
+        asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
         print("done with runAsync")
     
     
     #print out existing entries (if they exist) and 
-    async def promptRestart(self, serverID):
-        
+    async def promptRestart(self, serverID):       
         serverIDPath = dataPath + "/" + serverID
         channel = -1
         prompts = []
@@ -609,7 +602,8 @@ class ComposePrompt:
         #print out new prompt
         userMention = await self.bot.get_user_info(promptToUse["author"])       
         await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptToUse["prompt"]) + "Submitted by " + userMention.mention)
-        #FIXME save prompt somewhere
+        
+        
     
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
