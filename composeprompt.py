@@ -18,6 +18,9 @@ from datetime import datetime
 from datetime import timedelta
 import threading
 from random import randint
+from cogs.utils.chat_formatting import bold
+from cogs.utils.chat_formatting import warning
+from cogs.utils.chat_formatting import box
 
 #global variables. To be treated as constants
 global dataPath 
@@ -221,15 +224,17 @@ class ComposePrompt:
 
         # send list of entries via PM to requesting user
         messageText = ""
+        
+        if len(entriesList) == 0:
+            await self.bot.send_message(ctx.message.author, content="No entries yet! Get working!", tts=False, embed=None)
+            return
+        
+        await self.bot.send_message(ctx.message.author, content=bold("List of entries:"), tts=False, embed=None)
+        
         for entry in entriesList:
-            messageText += "\n- " + (await self.bot.get_user_info(entry['author'])).name + ": " + entry['entry']
-
-        if len(messageText) == 0:
-            messageText = "\n- No entries yet! Get working!"
-
-        messageText = "List of entries:" + messageText
-
-        await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+            userObject = await self.bot.get_user_info(entry['author'])
+            messageText = userObject.name +":\n" + entry['entry']
+            await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
 
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
@@ -513,6 +518,7 @@ class ComposePrompt:
         prompts = []
         priPrompts = []
         promptToUse = {}
+        newPrompt = {}
         
         #get settings information from JSON file
         with open(serverIDPath + '/settings.txt', 'r') as file:
@@ -528,7 +534,7 @@ class ComposePrompt:
             if settings["promptrun"] is False:
                 return
         else:
-            return
+            return         
        
         #get which channel composeprompt should run in for this server
         if "channel" in settings:
@@ -537,7 +543,35 @@ class ComposePrompt:
             channel = self.bot.get_server(serverID)
             await self.bot.send_message(channel, 'Error. Bot does not have channel to run in. Using default channel')    
         
-        #FIXME get entries and print them out.
+        with open(serverIDPath + '/entries.txt', 'r') as file:    
+            try:
+                entries = json.load(file)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                return
+        
+        #get if there was a prompt for the previous week. If so, show it.
+        if "prompt" in settings:
+            userMention = await self.bot.get_user_info(settings["prompt"]["author"])  
+            await self.bot.send_message(self.bot.get_channel(channel), bold("Last week's prompt was:\n") + box(settings["prompt"]["prompt"]) + "Submitted by " + userMention.mention)  
+ 
+        #see if list of entries is empty
+        if len(entries["entries"]) > 0:
+            #if not empty, print out all the entires
+            await self.bot.send_message(self.bot.get_channel(channel), bold("Here's what people submitted!:\n"))
+
+            for entry in entries["entries"]:
+                userMention = await self.bot.get_user_info(entry["author"])   
+                await self.bot.send_message(self.bot.get_channel(channel), "Submission by " + userMention.mention + " :\n" + entry["entry"])   
+                
+            #FIXME delete entries
+            with open(serverIDPath + '/entries.txt', 'w+') as file:
+                json.dump(newEntriesList, file, indent=4)
+            
+        else:
+            #state that there were no entries
+            await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))   
+            
         
         #see if there are any priority prompts
         with open(serverIDPath + '/priorityprompts.txt', 'r') as file:    
@@ -564,13 +598,17 @@ class ComposePrompt:
                     await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
                     return
             
+            #randomly choose a new prompt to set for this week's prompt
             index = randint(0, len(prompts["prompts"]) - 1)
             promptToUse = prompts["prompts"][index]
+            settings["prompt"] = promptToUse
             
+            with open(serverIDPath + '/settings.txt', 'w+') as file: 
+                json.dump({'settings': settings}, file, indent=4)
         
         #print out new prompt
         userMention = await self.bot.get_user_info(promptToUse["author"])       
-        await self.bot.send_message(self.bot.get_channel(channel), promptToUse["prompt"] + "\n submitted by " + userMention.mention)
+        await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptToUse["prompt"]) + "Submitted by " + userMention.mention)
         #FIXME save prompt somewhere
     
 def setup(bot):
