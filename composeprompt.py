@@ -38,10 +38,11 @@ newGlobalSettingsList = {'globalsettings': {'promptstarttimes': {}}}
 global newEntriesList
 newEntriesList = {'entries': []}
 global newDomainWhitelist
-newDomainWhitelist = {'whitelist': []}
+newDomainWhitelist = {'whitelist': ["soundcloud", "youtube", "instaud.io", "clyp.it"]}
 
 class ComposePrompt:
 
+    #holds times so they can be referenced later (for if they need to be canceled or reloaded)
     currentTimers = {}
 
     def __init__(self, bot):
@@ -51,11 +52,19 @@ class ComposePrompt:
         if not os.path.exists(dataPath):
             os.makedirs(dataPath)
         
+        #if globalsettings.txt does not exist, make
         if not os.path.exists(dataPath + '/globalsettings.txt'):
             with open(dataPath + '/globalsettings.txt', 'w+') as file:
                 json.dump(newGlobalSettingsList, file, indent=4)
-                
-        #FIXME: load timer from globalsettings.txt
+        else: #if it does exist, read from it and trigger timers.
+            servers = {}
+            with open(dataPath + '/globalsettings.txt', 'r') as file:
+                servers = json.load(file)
+                servers = servers["globalsettings"]["promptstarttimes"]
+            for server in servers: #for each server, load the prompt time
+                schedulerTime = int(self.convertToSchedulerTime(servers[server]))
+                self.currentTimers[server] = threading.Timer(schedulerTime, self.runAsync, [server,])
+                self.currentTimers[server].start()
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
@@ -67,9 +76,7 @@ class ComposePrompt:
         channelSettings = newSettingsList
         jsonInfo = {}
 
-
         ### 1. user inputs [p]newprompt [prompt goes here] (also error checking) ###
-        #await self.bot.say("I think you wrote \"" + prompt + "\".") #for test
 
         # ALLOW MAX PROMPT LENGTH TO BE SET BY ADMIN
         if len(prompt) > 300:
@@ -115,11 +122,13 @@ class ComposePrompt:
     async def entrysubmit(self, ctx, *, entry : str):
         """Submit an entry for this week's prompt."""
         
+        submittedMessage = ctx.message.content
         entryAuthor = ctx.message.author
         jsonEntries = newEntriesList
         serverID = ctx.message.server.id
         serverIDPath = dataPath + "/" + serverID
         entriesList = []
+        entryDomain = ""
         
         #get list of existing entries
         with open(serverIDPath + '/entries.txt', 'r') as file:
@@ -128,6 +137,37 @@ class ComposePrompt:
                 entriesList = jsonEntries['entries']
             except ValueError: #I guess the array didn't exist in the entries.txt file or something.
                 print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+        
+        #check and see if it has url in domain
+        regEx = "([a-zA-Z0-9]*\.[a-zA-Z0-9]*\.?[a-zA-Z0-9]*)" #what you're looking for is in group 3
+        result = re.search(regEx, submittedMessage)
+        
+        #if there is no url, return and do not submit entry
+        if result is None:
+            await self.bot.say("No URL detected.")
+            return
+
+        entryDomain = result.group(0)
+    
+        #get list of accepted domains
+        with open(serverIDPath + '/whitelist.txt', 'r') as file:
+            try:
+                whitelist = json.load(file)
+                whitelist = whitelist['whitelist']
+            except ValueError: #I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]entrysubmit: Could not get data from whitelist JSON file!")
+     
+        #check if URL is from any of the domains
+        whitelisted = False;
+        for domain in whitelist:
+            domainRegexResult = re.search(str.lower(domain), str.lower(entryDomain))
+            
+            if domainRegexResult is not None:
+                whitelisted = True;
+        
+        if not whitelisted:
+            await self.bot.say("Website is not whitelisted.")
+            return
         
         #append new entry to list of entries
         entriesList.append({'entry': entry, 'author': entryAuthor.id})
@@ -169,11 +209,14 @@ class ComposePrompt:
             json.dump(globalSettings, settingsFile, indent=4)
         
         schedulerTime = int(self.convertToSchedulerTime(newTime))
-        threading.Timer(schedulerTime, self.runAsync, [ctx.message.server.id,]).start()
+        
+        if serverID in self.currentTimers:
+            self.currentTimers[serverID].cancel()
+        
+        self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [ctx.message.server.id,])
+        self.currentTimers[serverID].start()
         await self.bot.say("Prompt reset time set to " + newTime)
-        
-        #FIXME: cancel previously loaded events for this server, so that the server doesn't have two prompt reset times
-        
+      
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)		
     async def priprompt(self, ctx, *, entry : str):
@@ -482,9 +525,8 @@ class ComposePrompt:
         endTime = datetime(year = nowTime.year, month = nowTime.month, day = nowTime.day, hour = hour, minute = minute, second = 0)
         
         if (dayOfWeek == nowTime.weekday()) and (hour > nowTime.hour or (hour == nowTime.hour and minute > nowTime.minute)):
-            print("should be set for today!")
+            pm = pm
         else:
-            #print("days should have been increased")
             endTime = endTime + timedelta(days = 7)
         
         #get difference between now and when the prompt switches
@@ -493,16 +535,15 @@ class ComposePrompt:
         #returns seconds left until reset time
         return secondsResult
    
-    @checks.admin()
-    @commands.command(pass_context=True, no_pm=True)
-    async def testCommand(self, ctx):
-        asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
+    ##test command to activate promptRestart
+    #@checks.admin()
+    #@commands.command(pass_context=True, no_pm=True)
+    #async def testCommand(self, ctx):
+    #    asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
    
-    # hopefully we can get rid of this middleman function
+    # middleman function for running an async function. threading.Timer can only call synchronous functions. So this synchronous function will call the asynchronous function we need.
     def runAsync(self, serverID):
         asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
-        print("done with runAsync")
-    
     
     #print out existing entries (if they exist) and 
     async def promptRestart(self, serverID):       
@@ -602,8 +643,31 @@ class ComposePrompt:
         #print out new prompt
         userMention = await self.bot.get_user_info(promptToUse["author"])       
         await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptToUse["prompt"]) + "Submitted by " + userMention.mention)
+           
+        #restart prompt timer
+        with open(dataPath + '/globalsettings.txt', 'r') as file:  
+            try:
+                globalSettings = json.load(file)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                return
+        
+        isInList = False
+        
+        for x in globalSettings["globalsettings"]["promptstarttimes"]:
+            print(x, x == serverID)
+            if x == serverID:
+                isInList = True
+                break;
+        
+        if isInList:
+            print("prompt reset!")
+            schedulerTime = int(self.convertToSchedulerTime(gloalSettings["globalsettings"]["promptstarttimes"][serverID]))
+            self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
+            self.currentTimers[serverID].start()             
+        else:
+            print("prompt was not reset!")
         
         
-    
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
