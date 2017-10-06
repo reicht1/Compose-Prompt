@@ -113,10 +113,12 @@ class ComposePrompt:
                 return
 
         newPrompt = {'prompt': prompt, 'author': ctx.message.author.id} # set prompt as dictionary
-        promptsList.append(newPrompt) # append new prompt to current list of prompts 
+        promptsList.append(newPrompt) # append new prompt to current list of prompts
                
         with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
             json.dump({'prompts': promptsList}, promptFile, indent=4) #rewrite prompts.txt with updated list of prompts
+
+        await self.bot.say("Prompt submitted!")
 
     @commands.command(pass_context=True, no_pm=True)		
     async def entrysubmit(self, ctx, *, entry : str):
@@ -218,7 +220,7 @@ class ComposePrompt:
         await self.bot.say("Prompt reset time set to " + newTime)
       
     @checks.admin()
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)
     async def priprompt(self, ctx, *, entry : str):
         """Create a priority prompt"""
         entryAuthor = ctx.message.author.id
@@ -241,11 +243,11 @@ class ComposePrompt:
         #overwrite file with new list
         with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
             json.dump({'priprompts': priPromptsList}, file, indent=4)
-        
-        await self.bot.say("priprompt function works!")
+
+        await self.bot.say("Priority prompt submitted!")
 
     @commands.command(pass_context=True, no_pm=True)
-    async def showentries(self, ctx):
+    async def viewentries(self, ctx):
         """Show all entries submitted for this week's prompt so far!"""
 
         entryAuthor = ctx.message.author
@@ -325,7 +327,7 @@ class ComposePrompt:
                     jsonInfo = json.load(file)
                     jsonInfo['settings']['channel'] = channel.id
                 except ValueError:
-                    print("ERROR: Composeprompt: prompton Could not get values from JSON.")
+                    print("ERROR: Composeprompt: prompton could not get values from JSON.")
                     return
             
             #if promptrun is false, set it to true
@@ -432,7 +434,7 @@ class ComposePrompt:
             except ValueError:
                 await self.bot.say("I am:\n⚪ a success message\n⚪ an error message\n🔘 in a relationship, stop staring")
 
-        await self.bot.say("adddomain function works! (I think.)")
+        await self.bot.say("Domain added to whitelist!")
 
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
@@ -460,11 +462,7 @@ class ComposePrompt:
         with open(serverIDPath + '/whitelist.txt', 'w+') as file:
             json.dump({'whitelist': whitelist}, file, indent=4)
 
-        await self.bot.say("removedomain function\n⚪ doesn't work\n⚪ works!\n🔘 has haunted my waking hours for months now")
-      
-    #test function for testing the scheduler library
-    async def testfunction(self, args : str):
-        print("Test function called, it said ", str(args))
+        await self.bot.say("Domain removed from whitelist!")
         
     #turn human readable time into a time readable by the timer
     def convertToSchedulerTime(self, humanTime : str):
@@ -597,8 +595,8 @@ class ComposePrompt:
             for entry in entries["entries"]:
                 userMention = await self.bot.get_user_info(entry["author"])   
                 await self.bot.send_message(self.bot.get_channel(channel), "Submission by " + userMention.mention + " :\n" + entry["entry"])   
-                
-            #FIXME delete entries
+
+            # delete entries
             with open(serverIDPath + '/entries.txt', 'w+') as file:
                 json.dump(newEntriesList, file, indent=4)
             
@@ -625,7 +623,7 @@ class ComposePrompt:
               
         else:
             #get new prompt from regular prompts
-            with open(serverIDPath + '/prompts.txt', 'r') as file:    
+            with open(serverIDPath + '/prompts.txt', 'r') as file:
                 try:
                     prompts = json.load(file)
                 except ValueError:
@@ -633,10 +631,19 @@ class ComposePrompt:
                     return
             
             #randomly choose a new prompt to set for this week's prompt
-            index = randint(0, len(prompts["prompts"]) - 1)
+            #ensure the chosen prompt is placed at the front of the list
+            #do not consider last week's chosen prompt for this week
+            index = randint(1, len(prompts["prompts"]) - 1)
             promptToUse = prompts["prompts"][index]
+            prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
             settings["prompt"] = promptToUse
-            
+
+            print("About to try writing to prompts.txt...")
+            with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
+                json.dump({'prompts': prompts}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
+
+            print("DID IT.")
+
             with open(serverIDPath + '/settings.txt', 'w+') as file: 
                 json.dump({'settings': settings}, file, indent=4)
         
@@ -664,7 +671,7 @@ class ComposePrompt:
             print("prompt reset!")
             schedulerTime = int(self.convertToSchedulerTime(gloalSettings["globalsettings"]["promptstarttimes"][serverID]))
             self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
-            self.currentTimers[serverID].start()             
+            self.currentTimers[serverID].start()
         else:
             print("prompt was not reset!")
         
