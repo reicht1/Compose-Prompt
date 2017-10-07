@@ -36,7 +36,7 @@ newPriPromptsList = {'priprompts': []}
 global newSettingsList
 newSettingsList = {'settings': {'promptrun': True, 'channel': '-1'}}
 global newGlobalSettingsList
-newGlobalSettingsList = {'globalsettings': {'promptstarttimes': {}}}
+newGlobalSettingsList = {'globalsettings': {'promptstarttimes': {}, 'nextpromptreset': {}}}
 global newEntriesList
 newEntriesList = {'entries': []}
 global newDomainWhitelist
@@ -62,11 +62,22 @@ class ComposePrompt:
             servers = {}
             with open(dataPath + '/globalsettings.txt', 'r') as file:
                 servers = json.load(file)
-                servers = servers["globalsettings"]["promptstarttimes"]
-            for server in servers: #for each server, load the prompt time
-                schedulerTime = int(self.convertToSchedulerTime(servers[server]))
-                self.currentTimers[server] = threading.Timer(schedulerTime, self.runAsync, [server,])
-                self.currentTimers[server].start()
+                servers = servers["globalsettings"]["nextpromptreset"]
+                nowTime = datetime.today()
+                
+            for serverID in servers: #for each server, load the prompt time
+                loadTime = servers[serverID]
+                print("server is ", loadTime[0], loadTime[1], loadTime[2], loadTime[3], loadTime[4])
+                newDateTime = datetime(year = int(loadTime[0]), month = int(loadTime[1]), day = int(loadTime[2]), hour = int(loadTime[3]), minute = int(loadTime[4]))
+                schedulerTime = (newDateTime - nowTime).total_seconds()
+                
+                if schedulerTime < 0:
+                    schedulerTime = 0;
+                
+                print("schedulerTime is ", str(schedulerTime))
+                
+                self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
+                self.currentTimers[serverID].start()
 
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
@@ -134,13 +145,32 @@ class ComposePrompt:
         entriesList = []
         entryDomain = ""
         
+        #get if a prompt does exist for this week
+        with open(serverIDPath + '/settings.txt', 'r') as file:
+            try:
+            
+                jsonSettings = json.load(file)
+                print("made jsonSettings")
+                settingsList = jsonSettings['settings']
+                
+                print("settings in settings")
+                print(str("prompt" not in settingsList))
+                
+                if "prompt" not in settingsList:
+                    await self.bot.say("Not currently accepting entries, as there is no prompt this week.")
+                    return
+                
+            except ValueError: #I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from settings JSON file!")
+                return
+        
         #get list of existing entries
         with open(serverIDPath + '/entries.txt', 'r') as file:
             try:
                 jsonEntries = json.load(file)
                 entriesList = jsonEntries['entries']
             except ValueError: #I guess the array didn't exist in the entries.txt file or something.
-                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from entries JSON file!")
         
         #check and see if it has url in domain
         regEx = "([a-zA-Z0-9]*\.[a-zA-Z0-9]*\.?[a-zA-Z0-9]*)" #what you're looking for is in group 3
@@ -193,6 +223,7 @@ class ComposePrompt:
         newTime = ""
         globalSettings = newGlobalSettingsList
         schedulerTime = 0
+        newTimeStruct = []
         
         #if the expected format of the prompt time was not found, exit this function
         if (result is None):
@@ -207,13 +238,16 @@ class ComposePrompt:
                 return
                 
         newTime = result.group(0)
+   
+        schedulerTime = int(self.convertToSchedulerTime(newTime))
+        newTimeStruct = self.convertToStructTime(newTime)
+        
         globalSettings["globalsettings"]["promptstarttimes"][serverID] = newTime
-            
+        globalSettings["globalsettings"]["nextpromptreset"][serverID] = [newTimeStruct.year, newTimeStruct.month, newTimeStruct.day, newTimeStruct.hour, newTimeStruct.minute]
+                
         with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
             json.dump(globalSettings, settingsFile, indent=4)
-        
-        schedulerTime = int(self.convertToSchedulerTime(newTime))
-        
+          
         if serverID in self.currentTimers:
             self.currentTimers[serverID].cancel()
         
@@ -466,7 +500,7 @@ class ComposePrompt:
 
         await self.bot.say("Domain removed from whitelist!")
         
-    #turn human readable time into a time readable by the timer
+    #turn human readable time of the week into seconds before time of the week occurs next
     def convertToSchedulerTime(self, humanTime : str):
         dayOfWeek = -1
         hour = -1
@@ -524,17 +558,98 @@ class ComposePrompt:
         nowTime = datetime.today()
         endTime = datetime(year = nowTime.year, month = nowTime.month, day = nowTime.day, hour = hour, minute = minute, second = 0)
         
-        if (dayOfWeek == nowTime.weekday()) and (hour > nowTime.hour or (hour == nowTime.hour and minute > nowTime.minute)):
-            pm = pm
+        if (dayOfWeek == nowTime.weekday()):
+            if hour > nowTime.hour or (hour == nowTime.hour and minute > nowTime.minute):
+                pm = pm
+            else:
+                endTime = endTime + timedelta(days = 7)
         else:
-            endTime = endTime + timedelta(days = 7)
+            while(dayOfWeek != endTime.weekday()):
+                endTime = endTime + timedelta(days = 1)
+                print("weekday is ", endTime.weekday())
         
         #get difference between now and when the prompt switches
         secondsResult = (endTime - nowTime).total_seconds()
         
         #returns seconds left until reset time
         return secondsResult
-   
+ 
+    #turn human readable time of the week into a datetime object (perhaps later convertToSchedulerTime and concertToStuctTime can be
+    #optimized, as most of these two functions is the same)
+    def convertToStructTime(self, humanTime : str):
+        dayOfWeek = -1
+        hour = -1
+        minute = -1
+        pm = False
+    
+        #get different elements of the string, and convert it to a number
+        #group 0 = entire match
+        #group 1 = day of the week
+        #group 2 = hour
+        #group 3 = minute
+        #group 4 = am or pm
+        regEx = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday) (1[0-2]|[1-9]):([0-5][0-9]) ([ap]m)"
+        result = re.search(regEx, humanTime)
+        
+        #convert day of the week to a number
+        if result.group(1) == 'monday':
+            dayOfWeek = 0
+        elif result.group(1) == 'tuesday':
+            dayOfWeek = 1
+        elif result.group(1) == 'wednesday':
+            dayOfWeek = 2
+        elif result.group(1) == 'thursday':
+            dayOfWeek = 3
+        elif result.group(1) == 'friday':
+            dayOfWeek = 4
+        elif result.group(1) == 'saturday':
+            dayOfWeek = 5
+        elif result.group(1) == 'sunday':
+            dayOfWeek = 6
+        else:
+            dayOfWeek = "ERROR"
+        
+        #convert hour into a number used by the time_struct
+        if result.group(4) == 'pm':
+            pm = True
+        else:
+            pm = False
+        
+        if result.group(2) == '12':
+            if pm:
+                hour = 12
+            else:
+                hour = 0
+        else:
+            if pm:
+                hour = int(result.group(2)) + 12
+            else:
+                hour = int(result.group(2)) 
+
+        #get the minute for time_struct
+        minute = int(result.group(3))
+        
+        #get the time right now, and get datetime object of when prompt switches
+        nowTime = datetime.today()
+        endTime = datetime(year = nowTime.year, month = nowTime.month, day = nowTime.day, hour = hour, minute = minute, second = 0)
+        
+        
+        if (dayOfWeek == nowTime.weekday()):
+            if hour > nowTime.hour or (hour == nowTime.hour and minute > nowTime.minute):
+                pm = pm
+            else:
+                endTime = endTime + timedelta(days = 7)
+        else:
+            while(dayOfWeek != endTime.weekday()):
+                endTime = endTime + timedelta(days = 1)
+                print("weekday is ", endTime.weekday())
+        
+        #get difference between now and when the prompt switches
+        resultStruct = endTime
+        
+        #returns seconds left until reset time
+        return resultStruct
+  
     ##test command to activate promptRestart
     #@checks.admin()
     #@commands.command(pass_context=True, no_pm=True)
@@ -542,7 +657,7 @@ class ComposePrompt:
     #    asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
    
     # middleman function for running an async function. threading.Timer can only call synchronous functions. So this synchronous function will call the asynchronous function we need.
-    def runAsync(self, serverID):
+    def runAsync(self, serverID):    
         asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
     
     #print out existing entries (if they exist) and 
@@ -584,28 +699,28 @@ class ComposePrompt:
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
                 return
         
-        #get if there was a prompt for the previous week. If so, show it.
+        #get if there was a prompt for the previous week. If so, show it and what was submitted last week.
         if "prompt" in settings:
             userMention = await self.bot.get_user_info(settings["prompt"]["author"])  
             await self.bot.send_message(self.bot.get_channel(channel), bold("Last week's prompt was:\n") + box(settings["prompt"]["prompt"]) + "Submitted by " + userMention.mention)  
  
-        #see if list of entries is empty
-        if len(entries["entries"]) > 0:
-            #if not empty, print out all the entires
-            await self.bot.send_message(self.bot.get_channel(channel), bold("Here's what people submitted!:\n"))
+            #see if list of entries is empty
+            if len(entries["entries"]) > 0:
+                #if not empty, print out all the entires
+                await self.bot.send_message(self.bot.get_channel(channel), bold("Here's what people submitted!:\n"))
 
-            for entry in entries["entries"]:
-                userMention = await self.bot.get_user_info(entry["author"])   
-                await self.bot.send_message(self.bot.get_channel(channel), "Submission by " + userMention.mention + " :\n" + entry["entry"])   
+                for entry in entries["entries"]:
+                    userMention = await self.bot.get_user_info(entry["author"])   
+                    await self.bot.send_message(self.bot.get_channel(channel), "Submission by " + userMention.mention + " :\n" + entry["entry"])   
 
-            # delete entries
-            with open(serverIDPath + '/entries.txt', 'w+') as file:
-                json.dump(newEntriesList, file, indent=4)
-            
-        else:
-            #state that there were no entries
-            await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))   
-            
+                # delete entries
+                with open(serverIDPath + '/entries.txt', 'w+') as file:
+                    json.dump(newEntriesList, file, indent=4)
+                
+            else:
+                #state that there were no entries
+                await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))   
+                
         
         print("See if there are any priority prompts")
         #see if there are any priority prompts
@@ -679,8 +794,15 @@ class ComposePrompt:
                 isInList = True
                 break;
         
-        #start new timer
+        #record new time and start new timer
         if isInList:
+        
+            newTimeStruct = self.convertToStructTime(globalSettings["globalsettings"]["promptstarttimes"][serverID])
+            globalSettings["globalsettings"]["nextpromptreset"][serverID] = [newTimeStruct.year, newTimeStruct.month, newTimeStruct.day, newTimeStruct.hour, newTimeStruct.minute]
+        
+            with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
+                json.dump(globalSettings, settingsFile, indent=4)
+        
             schedulerTime = int(self.convertToSchedulerTime(globalSettings["globalsettings"]["promptstarttimes"][serverID]))
             self.currentTimers[serverID].cancel()
             self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
