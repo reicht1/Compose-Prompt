@@ -25,6 +25,8 @@ from cogs.utils.chat_formatting import box
 #global variables. To be treated as constants
 global dataPath 
 dataPath = "./data/composeprompt"
+global minPrompts
+minPrompts = 5
 
 #default values for JSON files
 global newPromptsList
@@ -605,6 +607,7 @@ class ComposePrompt:
             await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))   
             
         
+        print("See if there are any priority prompts")
         #see if there are any priority prompts
         with open(serverIDPath + '/priorityprompts.txt', 'r') as file:    
             try:
@@ -615,6 +618,7 @@ class ComposePrompt:
         
         #see if priority list is empty. If it has stuff in it, use that first. Else, use regular prompts
         if len(priPrompts["priprompts"]) > 0:
+            print("Getting priority prompt!")
             promptToUse = priPrompts["priprompts"][0]
             priPrompts["priprompts"].pop(0)
 
@@ -622,27 +626,35 @@ class ComposePrompt:
                 json.dump({"priprompts": priPrompts["priprompts"]}, file, indent=4)
               
         else:
+            prompts = {}
             #get new prompt from regular prompts
+            print("Getting regular prompt")
             with open(serverIDPath + '/prompts.txt', 'r') as file:
                 try:
                     prompts = json.load(file)
+                    print("Got prompts from JSON file")
                 except ValueError:
                     await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
                     return
             
-            #randomly choose a new prompt to set for this week's prompt
-            #ensure the chosen prompt is placed at the front of the list
-            #do not consider last week's chosen prompt for this week
-            index = randint(1, len(prompts["prompts"]) - 1)
-            promptToUse = prompts["prompts"][index]
-            prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
-            settings["prompt"] = promptToUse
+            if len(prompts["prompts"]) >= minPrompts:
+                print("len > minprompts")
+                #randomly choose a new prompt to set for this week's prompt
+                #ensure the chosen prompt is placed at the front of the list
+                #do not consider last week's chosen prompt for this week
+                index = randint(1, len(prompts["prompts"]) - 1)
+                promptToUse = prompts["prompts"][index]
+                prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
+                settings["prompt"] = promptToUse
+                
+                print("About to try writing to prompts.txt...")
+                with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
+                    json.dump({'prompts': prompts["prompts"]}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
 
-            print("About to try writing to prompts.txt...")
-            with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
-                json.dump({'prompts': prompts}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
-
-            print("DID IT.")
+            else:
+                promptToUse["prompt"] = "There are not enough prompts. Please submit some!"
+                promptToUse["author"] = self.bot.user.id
+                settings.pop("prompt", None)
 
             with open(serverIDPath + '/settings.txt', 'w+') as file: 
                 json.dump({'settings': settings}, file, indent=4)
@@ -667,14 +679,12 @@ class ComposePrompt:
                 isInList = True
                 break;
         
+        #start new timer
         if isInList:
-            print("prompt reset!")
-            schedulerTime = int(self.convertToSchedulerTime(gloalSettings["globalsettings"]["promptstarttimes"][serverID]))
+            schedulerTime = int(self.convertToSchedulerTime(globalSettings["globalsettings"]["promptstarttimes"][serverID]))
+            self.currentTimers[serverID].cancel()
             self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
-            self.currentTimers[serverID].start()
-        else:
-            print("prompt was not reset!")
-        
+            self.currentTimers[serverID].start()      
         
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
