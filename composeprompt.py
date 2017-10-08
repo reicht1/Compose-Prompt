@@ -150,11 +150,11 @@ class ComposePrompt:
             try:
             
                 jsonSettings = json.load(file)
-                print("made jsonSettings")
+                # print("made jsonSettings")
                 settingsList = jsonSettings['settings']
                 
-                print("settings in settings")
-                print(str("prompt" not in settingsList))
+                # print("settings in settings")
+                # print(str("prompt" not in settingsList))
                 
                 if "prompt" not in settingsList:
                     await self.bot.say("Not currently accepting entries, as there is no prompt this week.")
@@ -719,10 +719,10 @@ class ComposePrompt:
                 
             else:
                 #state that there were no entries
-                await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))   
+                await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))
                 
         
-        print("See if there are any priority prompts")
+        # print("See if there are any priority prompts")
         #see if there are any priority prompts
         with open(serverIDPath + '/priorityprompts.txt', 'r') as file:    
             try:
@@ -733,7 +733,7 @@ class ComposePrompt:
         
         #see if priority list is empty. If it has stuff in it, use that first. Else, use regular prompts
         if len(priPrompts["priprompts"]) > 0:
-            print("Getting priority prompt!")
+            # print("Getting priority prompt!")
             promptToUse = priPrompts["priprompts"][0]
             priPrompts["priprompts"].pop(0)
 
@@ -743,11 +743,11 @@ class ComposePrompt:
         else:
             prompts = {}
             #get new prompt from regular prompts
-            print("Getting regular prompt")
+            # print("Getting regular prompt")
             with open(serverIDPath + '/prompts.txt', 'r') as file:
                 try:
                     prompts = json.load(file)
-                    print("Got prompts from JSON file")
+                    # print("Got prompts from JSON file")
                 except ValueError:
                     await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
                     return
