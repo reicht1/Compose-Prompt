@@ -802,7 +802,8 @@ class ComposePrompt:
         
             with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
                 json.dump(globalSettings, settingsFile, indent=4)
-        
+
+            time.sleep(5)
             schedulerTime = int(self.convertToSchedulerTime(globalSettings["globalsettings"]["promptstarttimes"][serverID]))
             self.currentTimers[serverID].cancel()
             self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
