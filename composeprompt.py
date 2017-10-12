@@ -67,14 +67,11 @@ class ComposePrompt:
                 
             for serverID in servers: #for each server, load the prompt time
                 loadTime = servers[serverID]
-                print("server is ", loadTime[0], loadTime[1], loadTime[2], loadTime[3], loadTime[4])
                 newDateTime = datetime(year = int(loadTime[0]), month = int(loadTime[1]), day = int(loadTime[2]), hour = int(loadTime[3]), minute = int(loadTime[4]))
                 schedulerTime = (newDateTime - nowTime).total_seconds()
                 
                 if schedulerTime < 0:
                     schedulerTime = 0;
-                
-                print("schedulerTime is ", str(schedulerTime))
                 
                 self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
                 self.currentTimers[serverID].start()
@@ -147,14 +144,9 @@ class ComposePrompt:
         
         #get if a prompt does exist for this week
         with open(serverIDPath + '/settings.txt', 'r') as file:
-            try:
-            
+            try:          
                 jsonSettings = json.load(file)
-                # print("made jsonSettings")
                 settingsList = jsonSettings['settings']
-                
-                # print("settings in settings")
-                # print(str("prompt" not in settingsList))
                 
                 if "prompt" not in settingsList:
                     await self.bot.say("Not currently accepting entries, as there is no prompt this week.")
@@ -566,7 +558,6 @@ class ComposePrompt:
         else:
             while(dayOfWeek != endTime.weekday()):
                 endTime = endTime + timedelta(days = 1)
-                print("weekday is ", endTime.weekday())
         
         #get difference between now and when the prompt switches
         secondsResult = (endTime - nowTime).total_seconds()
@@ -642,7 +633,6 @@ class ComposePrompt:
         else:
             while(dayOfWeek != endTime.weekday()):
                 endTime = endTime + timedelta(days = 1)
-                print("weekday is ", endTime.weekday())
         
         #get difference between now and when the prompt switches
         resultStruct = endTime
@@ -753,7 +743,6 @@ class ComposePrompt:
                     return
             
             if len(prompts["prompts"]) >= minPrompts:
-                print("len > minprompts")
                 #randomly choose a new prompt to set for this week's prompt
                 #ensure the chosen prompt is placed at the front of the list
                 #do not consider last week's chosen prompt for this week
@@ -762,7 +751,6 @@ class ComposePrompt:
                 prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
                 settings["prompt"] = promptToUse
                 
-                print("About to try writing to prompts.txt...")
                 with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
                     json.dump({'prompts': prompts["prompts"]}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
 
@@ -789,7 +777,6 @@ class ComposePrompt:
         isInList = False
         
         for x in globalSettings["globalsettings"]["promptstarttimes"]:
-            print(x, x == serverID)
             if x == serverID:
                 isInList = True
                 break;
