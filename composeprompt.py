@@ -163,6 +163,7 @@ class ComposePrompt:
                 entriesList = jsonEntries['entries']
             except ValueError: #I guess the array didn't exist in the entries.txt file or something.
                 print("ERROR: Composeprompt: [p]newprompt: Could not get data from entries JSON file!")
+                return
         
         #check and see if it has url in domain
         regEx = "([a-zA-Z0-9]*\.[a-zA-Z0-9]*\.?[a-zA-Z0-9]*)" #what you're looking for is in group 3
@@ -306,8 +307,103 @@ class ComposePrompt:
             messageText = userObject.name +":\n" + entry['entry']
             await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
 
+
     @checks.admin()
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)
+    async def viewprompts(self, ctx):
+        """Show all prompts AND priority prompts stored by this bot."""
+        promptAuthor = ctx.message.author
+        jsonPrompts = newPromptsList
+        jsonPriPrompts = newPriPromptsList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        promptsList = []
+
+        # get list of existing PRIORITY PROMPTS
+        with open(serverIDPath + '/priorityprompts.txt', 'r') as file:
+            try:
+                jsonPriPrompts = json.load(file)
+                priPromptsList = jsonPriPrompts['priprompts']
+            except ValueError:
+                print("ERROR: Composeprompt: [p]viewprompts: Could not get data from priprompts JSON file!")
+
+        await self.bot.say("Loading priority prompts and prompts...")
+
+        # send list of prompts via PM to requesting user
+        messageText = ""
+
+        if len(priPromptsList) == 0:
+            await self.bot.send_message(ctx.message.author, content="No priority prompts yet! You should add some!", tts=False, embed=None)
+        else:
+            messageText = "List of priority prompts:"
+            index = 1
+            for priPrompt in priPromptsList:
+                userObject = await self.bot.get_user_info(priPrompt['author'])
+                messageText = messageText + "\nP" + str(index) + ". " + userObject.name + ": " + priPrompt['prompt']
+                index += 1
+            await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+
+        # get list of existing PROMPTS
+        with open(serverIDPath + '/prompts.txt', 'r') as file:
+            try:
+                jsonPrompts = json.load(file)
+                promptsList = jsonPrompts['prompts']
+            except ValueError:
+                print("ERROR: Composeprompt: [p]viewprompts: Could not get data from prompts JSON file!")
+
+        # send list of prompts via PM to requesting user
+        messageText = ""
+
+        if len(promptsList) == 0:
+            await self.bot.send_message(ctx.message.author, content="No prompts yet! You should add some!", tts=False, embed=None)
+        else:
+            messageText = "List of prompts:"
+            index = 1
+            for prompt in promptsList:
+                userObject = await self.bot.get_user_info(prompt['author'])
+                messageText = messageText + "\n" + str(index) + ". " + userObject.name + ": " + prompt['prompt']
+                index += 1
+            await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+
+    @checks.admin()
+    @commands.command(pass_context=True, no_pm=True)
+    async def deleteprompt(self, ctx, num):
+        """Delete a specific prompt by index number."""
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        dataFile = ""
+
+        if num[0].lower() == "p":
+            dataFile = "/priorityprompts.txt"
+            baseList = newPriPromptsList
+            keyName = "priprompts"
+            num = int(num[1:])
+        else:
+            dataFile = "/prompts.txt"
+            baseList = newPromptsList
+            keyName = "prompts"
+            num = int(num)
+
+        baseList = []
+        with open(serverIDPath + dataFile, "r") as promptsFile:
+            try:
+                baseList = json.load(promptsFile)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+                return
+
+        if num < 1 or num > len(baseList):
+            await self.bot.say("Invalid index number.")
+            return
+
+        baseList[keyName].pop(num - 1)
+
+        with open(serverIDPath + dataFile, 'w+') as file:
+            json.dump({keyName: baseList[keyName]}, file, indent=4)
+
+
+    @checks.admin()
+    @commands.command(pass_context=True, no_pm=True)
     async def prompton(self, ctx):
         """Turn prompt mode on for this server"""
         serverID = ctx.message.server.id
