@@ -327,7 +327,7 @@ class ComposePrompt:
             except ValueError:
                 print("ERROR: Composeprompt: [p]viewprompts: Could not get data from priprompts JSON file!")
 
-        await self.bot.say("Loading priority prompts and prompts...")
+        await self.bot.send_message(ctx.message.author, content="Loading priority prompts and prompts...", tts=False, embed=None)
 
         # send list of prompts via PM to requesting user
         messageText = ""
@@ -373,16 +373,25 @@ class ComposePrompt:
         serverIDPath = dataPath + "/" + serverID
         dataFile = ""
 
+        # Depending on whether the num input begins with a P or not
+        # (i.e. whether the input refers to a prompt or priority prompt),
+        # specify the appropriate filename and keyname.
         if num[0].lower() == "p":
             dataFile = "/priorityprompts.txt"
             baseList = newPriPromptsList
             keyName = "priprompts"
-            num = int(num[1:])
+            try:
+                num = int(num[1:])
+            except ValueError:
+                await self.bot.say("Invalid input!")
         else:
             dataFile = "/prompts.txt"
             baseList = newPromptsList
             keyName = "prompts"
-            num = int(num)
+            try:
+                num = int(num)
+            except ValueError:
+                await self.bot.say("Invalid input!")
 
         baseList = []
         with open(serverIDPath + dataFile, "r") as promptsFile:
@@ -392,11 +401,13 @@ class ComposePrompt:
                 await self.bot.say("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
                 return
 
-        if num < 1 or num > len(baseList):
+        if num < 1 or num > len(baseList[keyName]):
             await self.bot.say("Invalid index number.")
             return
 
-        baseList[keyName].pop(num - 1)
+        poppedPrompt = baseList[keyName].pop(num - 1)
+
+        await self.bot.say("You have deleted the prompt '" + poppedPrompt['prompt'] + "'")
 
         with open(serverIDPath + dataFile, 'w+') as file:
             json.dump({keyName: baseList[keyName]}, file, indent=4)
