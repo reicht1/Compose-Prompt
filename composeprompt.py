@@ -1,12 +1,14 @@
 #Composeprompt.py, a cog to allow for the automation of weekly composition prompts
 # Written by Tyler Reich and Vincent Bryant
 
+import shutil
 import asyncio
 import discord
 from discord.ext import commands
 import os
 from os import path
 from os import makedirs
+from os import listdir
 import json
 from cogs.utils import checks
 import sched
@@ -27,6 +29,8 @@ global dataPath
 dataPath = "./data/composeprompt"
 global minPrompts
 minPrompts = 5
+global busyFile
+busyFile = "/busy"
 
 #default values for JSON files
 global newPromptsList
@@ -58,24 +62,17 @@ class ComposePrompt:
         if not os.path.exists(dataPath + '/globalsettings.txt'):
             with open(dataPath + '/globalsettings.txt', 'w+') as file:
                 json.dump(newGlobalSettingsList, file, indent=4)
-        else: #if it does exist, read from it and trigger timers.
-            servers = {}
-            with open(dataPath + '/globalsettings.txt', 'r') as file:
-                servers = json.load(file)
-                servers = servers["globalsettings"]["nextpromptreset"]
-                nowTime = datetime.today()
-                
-            for serverID in servers: #for each server, load the prompt time
-                loadTime = servers[serverID]
-                newDateTime = datetime(year = int(loadTime[0]), month = int(loadTime[1]), day = int(loadTime[2]), hour = int(loadTime[3]), minute = int(loadTime[4]))
-                schedulerTime = (newDateTime - nowTime).total_seconds()
-                
-                if schedulerTime < 0:
-                    schedulerTime = 0;
-                
-                self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
-                self.currentTimers[serverID].start()
 
+        #print("printing directories...")
+        directoryList = os.listdir(dataPath)
+        for directory in directoryList:
+            if os.path.exists(dataPath + '/' + directory + busyFile):
+                shutil.rmtree(dataPath + '/' + directory + busyFile)
+                
+        #start checking loop
+        thread = threading.Thread(target=self.periodicCheck, args=()).start()
+
+         
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
         """Submit a new prompt."""
@@ -240,13 +237,6 @@ class ComposePrompt:
                 
         with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
             json.dump(globalSettings, settingsFile, indent=4)
-          
-        if serverID in self.currentTimers:
-            self.currentTimers[serverID].cancel()
-        
-        self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [ctx.message.server.id,])
-        self.currentTimers[serverID].start()
-        await self.bot.say("Prompt reset time set to " + newTime)
       
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
@@ -484,6 +474,26 @@ class ComposePrompt:
         serverIDPath = dataPath + "/" + serverID
         jsonInfo = {}
         message = "ERROR"
+        globalSettings = {}
+        
+        #remove information about server from globalsettings.txt 
+        #this with block gets information
+        with open(dataPath + '/globalsettings.txt', 'r') as file:
+            try:
+                globalSettings = json.load(file)
+                print(globalSettings["globalsettings"]["nextpromptreset"][serverID], globalSettings["globalsettings"]["promptstarttimes"][serverID])
+                globalSettings["globalsettings"]["nextpromptreset"].pop(serverID, None)
+                globalSettings["globalsettings"]["promptstarttimes"].pop(serverID, None)              
+            except ValueError:
+                print("ERROR: Composeprompt: Could not get values from globalsettings JSON. Assuming list of servers to track is empty.")
+                return
+        #this with block sets information
+        with open(dataPath + '/globalsettings.txt', 'w+') as file:
+            try:
+                json.dump(globalSettings, file, indent=4)
+            except ValueError:
+                print("ERROR: Composeprompt: Could not write to globalsettings JSON.")
+        
         
         #check to see if settings.txt exists. if not, no need to turn promptrun setting off
         if os.path.exists(serverIDPath + '/settings.txt'):
@@ -492,7 +502,8 @@ class ComposePrompt:
                 try:
                     jsonInfo = json.load(file)
                 except ValueError:
-                    print("ERROR: Assigngamerole: Could not get values from JSON. Assuming list of servers to track is empty")
+                    print("ERROR: Composeprompt: Could not get values from settings JSON. Assuming list of servers to track is empty.")
+                    return
             
             #if promptrun is false, set it to true
             if jsonInfo['settings']['promptrun']:
@@ -754,8 +765,33 @@ class ComposePrompt:
     #    asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
    
     # middleman function for running an async function. threading.Timer can only call synchronous functions. So this synchronous function will call the asynchronous function we need.
-    def runAsync(self, serverID):    
-        asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
+    def periodicCheck(self):
+        waitTime = 60
+        servers = {}
+        continueChecking = True;
+        #continue this loop indefinitely
+        while(continueChecking):
+            #if not os.path.exists(dataPath + "/itworked.txt"):
+            #    os.makedirs(dataPath + "/itworked.txt")
+            #print("In while loop")
+            with open(dataPath + '/globalsettings.txt', 'r') as file:
+                servers = json.load(file)
+                servers = servers["globalsettings"]["nextpromptreset"]
+                nowTime = datetime.today()
+                
+            for serverID in servers: #for each server, load the prompt time
+                loadTime = servers[serverID]
+                newDateTime = datetime(year = int(loadTime[0]), month = int(loadTime[1]), day = int(loadTime[2]), hour = int(loadTime[3]), minute = int(loadTime[4]))
+                schedulerTime = (newDateTime - nowTime).total_seconds()
+                
+                if schedulerTime < 0:
+                    continueChecking = asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)           
+        
+            #wait, and then do it all again
+            time.sleep(waitTime)
+    
+    #def runAsync(self, serverID):    
+    #    asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
     
     #print out existing entries (if they exist) and 
     async def promptRestart(self, serverID):       
@@ -766,6 +802,13 @@ class ComposePrompt:
         promptToUse = {}
         newPrompt = {}
         
+        #see if busy file exists for this server. If so, promptRestart is already running and this instance should abort
+        if os.path.isfile(serverIDPath + busyFile):
+            print("crap, promptRestart is already running!")
+            return False
+        else:
+            os.makedirs(serverIDPath + busyFile)
+        
         #get settings information from JSON file
         with open(serverIDPath + '/settings.txt', 'r') as file:
             try:
@@ -773,15 +816,19 @@ class ComposePrompt:
                 settings = settings['settings']
             except ValueError:
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from globalsettings.txt JSON file!")
-                return
+                return True
        
         #check to see if composeprompt is supposed to be running in this server
         if "promptrun" in settings:
             if settings["promptrun"] is False:
-                return
+                return True
         else:
-            return         
+            return True     
        
+        #if it gets to this point, then it is supposed to be running this this server
+       
+
+            
         #get which channel composeprompt should run in for this server
         if "channel" in settings:
             channel = settings["channel"]
@@ -793,8 +840,8 @@ class ComposePrompt:
             try:
                 entries = json.load(file)
             except ValueError:
-                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
-                return
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from entires.txt JSON file!")
+                return True
         
         #get if there was a prompt for the previous week. If so, show it and what was submitted last week.
         if "prompt" in settings:
@@ -826,7 +873,7 @@ class ComposePrompt:
                 priPrompts = json.load(file)
             except ValueError:
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
-                return
+                return True
         
         #see if priority list is empty. If it has stuff in it, use that first. Else, use regular prompts
         if len(priPrompts["priprompts"]) > 0:
@@ -847,7 +894,7 @@ class ComposePrompt:
                     # print("Got prompts from JSON file")
                 except ValueError:
                     await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
-                    return
+                    return True
             
             if len(prompts["prompts"]) >= minPrompts:
                 #randomly choose a new prompt to set for this week's prompt
@@ -873,13 +920,13 @@ class ComposePrompt:
         userMention = await self.bot.get_user_info(promptToUse["author"])       
         await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptToUse["prompt"]) + "Submitted by " + userMention.mention)
            
-        #restart prompt timer
+        #restart prompt timer 
         with open(dataPath + '/globalsettings.txt', 'r') as file:  
             try:
                 globalSettings = json.load(file)
             except ValueError:
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
-                return
+                return True
         
         isInList = False
         
@@ -895,13 +942,15 @@ class ComposePrompt:
             globalSettings["globalsettings"]["nextpromptreset"][serverID] = [newTimeStruct.year, newTimeStruct.month, newTimeStruct.day, newTimeStruct.hour, newTimeStruct.minute]
         
             with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
-                json.dump(globalSettings, settingsFile, indent=4)
-
-            time.sleep(5)
-            schedulerTime = int(self.convertToSchedulerTime(globalSettings["globalsettings"]["promptstarttimes"][serverID]))
-            self.currentTimers[serverID].cancel()
-            self.currentTimers[serverID] = threading.Timer(schedulerTime, self.runAsync, [serverID,])
-            self.currentTimers[serverID].start()      
+                json.dump(globalSettings, settingsFile, indent=4) 
+                #print("reset new time to", globalSettings["globalsettings"]["nextpromptreset"][serverID])
+        
+        #remove busyfile
+        
+        if os.path.exists(serverIDPath + busyFile):
+            shutil.rmtree(serverIDPath + busyFile)
+            
+        return True
         
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
