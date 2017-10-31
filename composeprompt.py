@@ -48,9 +48,6 @@ newDomainWhitelist = {'whitelist': ["soundcloud", "youtube", "instaud.io", "clyp
 
 class ComposePrompt:
 
-    #holds times so they can be referenced later (for if they need to be canceled or reloaded)
-    currentTimers = {}
-
     def __init__(self, bot):
         self.bot = bot
 
@@ -71,8 +68,7 @@ class ComposePrompt:
                 
         #start checking loop
         thread = threading.Thread(target=self.periodicCheck, args=()).start()
-
-         
+      
     @commands.command(pass_context=True, no_pm=True)		
     async def newprompt(self, ctx, *, prompt : str):
         """Submit a new prompt."""
@@ -163,14 +159,19 @@ class ComposePrompt:
                 return
         
         #check and see if it has url in domain
-        regEx = "([a-zA-Z0-9]*\.[a-zA-Z0-9]*\.?[a-zA-Z0-9]*)" #what you're looking for is in group 3
+        regEx = "([a-zA-Z0-9]*\.[a-zA-Z0-9]*\.?[a-zA-Z0-9]*)" #what you're looking for is in group 3       
+        strictURLregEx = "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+" 
         result = re.search(regEx, submittedMessage)
         
         #if there is no url, return and do not submit entry
         if result is None:
             await self.bot.say("No URL detected.")
             return
-
+        
+        foundURL = re.search(strictURLregEx, entry)
+        if foundURL is not None:
+            entry = entry.replace(foundURL.group(0), "<" + foundURL.group(0) + ">")
+               
         entryDomain = result.group(0)
     
         #get list of accepted domains
@@ -237,6 +238,8 @@ class ComposePrompt:
                 
         with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
             json.dump(globalSettings, settingsFile, indent=4)
+          
+        await self.bot.say("Prompt reset time set to " + newTime)
       
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
@@ -297,7 +300,85 @@ class ComposePrompt:
             messageText = userObject.name +":\n" + entry['entry']
             await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
 
+    @commands.command(pass_context=True, no_pm=True)
+    async def myentries(self, ctx):
+        
+        entryAuthor = ctx.message.author
+        jsonEntries = newEntriesList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        entriesList = []
+        count = 0;
 
+        # get list of existing entries
+        with open(serverIDPath + '/entries.txt', 'r') as file:
+            try:
+                jsonEntries = json.load(file)
+                entriesList = jsonEntries['entries']
+            except ValueError:  # I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+
+        # send list of entries via PM to requesting user
+        messageText = ""
+        
+        if len(entriesList) == 0:
+            await self.bot.send_message(ctx.message.author, content="No one has submitted anything yet.\nAnd that includes you.", tts=False, embed=None)
+            return
+        
+        await self.bot.send_message(ctx.message.author, content=bold("List of entries:"), tts=False, embed=None)
+        
+        for entry in entriesList:
+            if entry['author'] == entryAuthor.id:
+                count = count + 1
+                messageText = "Entry #" + str(count) + ": " + entry['entry']
+                await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+        
+        if count is 0:
+            await self.bot.send_message(ctx.message.author, content="This list is empty because you have submitted exactly nothing.\nGood job.", tts=False, embed=None)
+        
+    @commands.command(pass_context=True, no_pm=True)
+    async def deletemyentry(self, ctx, num):
+    
+        #if num is not a valid number, then this function stops
+        try:
+            int(num)
+        except ValueError:
+            await self.bot.say("No such entry exists.")
+            return
+        
+        entryAuthor = ctx.message.author
+        jsonEntries = newEntriesList
+        serverID = ctx.message.server.id
+        serverIDPath = dataPath + "/" + serverID
+        entriesList = []
+        count = 0;
+
+        # get list of existing entries
+        with open(serverIDPath + '/entries.txt', 'r') as file:
+            try:
+                jsonEntries = json.load(file)
+                entriesList = jsonEntries['entries']
+            except ValueError:  # I guess the array didn't exist in the entries.txt file or something.
+                print("ERROR: Composeprompt: [p]newprompt: Could not get data from JSON file!")
+
+        # send list of entries via PM to requesting user
+        messageText = ""
+        
+        index = 0
+        for entry in entriesList:   
+            if entry['author'] == entryAuthor.id:
+                count = count + 1
+                if count == int(num):
+                    deletedEntry = entriesList.pop(index)
+                    #await self.bot.send_message(ctx.message.author, content="Removed " + str(deletedEntry['entry']), tts=False, embed=None)
+                    await self.bot.say("Removed " + str(deletedEntry['entry']))
+                    with open(serverIDPath + '/entries.txt', 'w+') as file:
+                        json.dump({"entries": entriesList}, file, indent=4)
+                    
+                    return
+            index = index + 1
+        await self.bot.say("No such entry exists.")
+            
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
     async def viewprompts(self, ctx):
@@ -401,7 +482,6 @@ class ComposePrompt:
 
         with open(serverIDPath + dataFile, 'w+') as file:
             json.dump({keyName: baseList[keyName]}, file, indent=4)
-
 
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
@@ -584,7 +664,7 @@ class ComposePrompt:
 
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
-    async def removedomain(self, ctx, domain : str):
+    async def deletedomain(self, ctx, domain : str):
         serverID = ctx.message.server.id
         serverIDPath = dataPath + "/" + serverID
         domain = domain.lower() # make domain lowercase
@@ -764,7 +844,7 @@ class ComposePrompt:
     #async def testCommand(self, ctx):
     #    asyncio.run_coroutine_threadsafe(self.promptRestart(ctx.message.server.id), self.bot.loop)
    
-    # middleman function for running an async function. threading.Timer can only call synchronous functions. So this synchronous function will call the asynchronous function we need.
+    #runs continuously, checking to see if it is time to activate promptRestart 
     def periodicCheck(self):
         waitTime = 60
         servers = {}
@@ -790,10 +870,8 @@ class ComposePrompt:
             #wait, and then do it all again
             time.sleep(waitTime)
     
-    #def runAsync(self, serverID):    
-    #    asyncio.run_coroutine_threadsafe(self.promptRestart(serverID), self.bot.loop)
-    
-    #print out existing entries (if they exist) and 
+    #print out existing entries (if they exist) and choose a new one. Return false if the instance of periodicCheck() that called it is duplicate. Returns True 
+    #otherwise.
     async def promptRestart(self, serverID):       
         serverIDPath = dataPath + "/" + serverID
         channel = -1
@@ -937,7 +1015,6 @@ class ComposePrompt:
         
         #record new time and start new timer
         if isInList:
-        
             newTimeStruct = self.convertToStructTime(globalSettings["globalsettings"]["promptstarttimes"][serverID])
             globalSettings["globalsettings"]["nextpromptreset"][serverID] = [newTimeStruct.year, newTimeStruct.month, newTimeStruct.day, newTimeStruct.hour, newTimeStruct.minute]
         
@@ -945,8 +1022,7 @@ class ComposePrompt:
                 json.dump(globalSettings, settingsFile, indent=4) 
                 #print("reset new time to", globalSettings["globalsettings"]["nextpromptreset"][serverID])
         
-        #remove busyfile
-        
+        #remove busyfile        
         if os.path.exists(serverIDPath + busyFile):
             shutil.rmtree(serverIDPath + busyFile)
             
