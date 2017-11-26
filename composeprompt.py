@@ -82,7 +82,7 @@ class ComposePrompt:
         ### 1. user inputs [p]newprompt [prompt goes here] (also error checking) ###
 
         # ALLOW MAX PROMPT LENGTH TO BE SET BY ADMIN
-        if len(prompt) > 300:
+        if len(prompt) > 500:
             await self.bot.say("Your prompt was over 300 characters. Prompts should be 300 characters or fewer.")
             return
 
