@@ -4,6 +4,10 @@
 import shutil
 import asyncio
 import discord
+from discord import errors
+from discord.errors import Forbidden
+from discord.errors import HTTPException
+from discord.errors import NotFound                  
 from discord.ext import commands
 import os
 from os import path
@@ -28,9 +32,11 @@ from cogs.utils.chat_formatting import box
 global dataPath 
 dataPath = "./data/composeprompt"
 global minPrompts
-minPrompts = 5
+minPrompts = 10
 global busyFile
 busyFile = "/busy"
+global likeEmoji
+likeEmoji = 11088
 
 #default values for JSON files
 global newPromptsList
@@ -69,7 +75,7 @@ class ComposePrompt:
         #start checking loop
         thread = threading.Thread(target=self.periodicCheck, args=()).start()
       
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)        
     async def newprompt(self, ctx, *, prompt : str):
         """Submit a new prompt."""
         serverID = ctx.message.server.id
@@ -123,7 +129,7 @@ class ComposePrompt:
 
         await self.bot.say("Prompt submitted!")
 
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)        
     async def entrysubmit(self, ctx, *, entry : str):
         """Submit an entry for this week's prompt."""
         
@@ -204,7 +210,7 @@ class ComposePrompt:
         await self.bot.say("Entry submitted!")
 
     @checks.admin()
-    @commands.command(pass_context=True, no_pm=True)		
+    @commands.command(pass_context=True, no_pm=True)        
     async def setpromptstart(self, ctx, *, promptTime : str):
         """Set the prompt time when a prompt period begins and ends"""
         #regular expression for imput format should be:
@@ -404,15 +410,19 @@ class ComposePrompt:
         messageText = ""
 
         if len(priPromptsList) == 0:
-            await self.bot.send_message(ctx.message.author, content="No priority prompts yet! You should add some!", tts=False, embed=None)
+            await self.bot.send_message(ctx.message.author, content="There are no priority prompts loaded.", tts=False, embed=None)
         else:
-            messageText = "List of priority prompts:"
+            messageText = "*List of priority prompts:*"
             index = 1
             for priPrompt in priPromptsList:
                 userObject = await self.bot.get_user_info(priPrompt['author'])
                 messageText = messageText + "\nP" + str(index) + ". " + userObject.name + ": " + priPrompt['prompt']
                 index += 1
-            await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+                if index % 5 == 0:
+                    await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+                    messageText = "";
+            if index % 5 != 0:
+                await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
 
         # get list of existing PROMPTS
         with open(serverIDPath + '/prompts.txt', 'r') as file:
@@ -428,14 +438,17 @@ class ComposePrompt:
         if len(promptsList) == 0:
             await self.bot.send_message(ctx.message.author, content="No prompts yet! You should add some!", tts=False, embed=None)
         else:
-            messageText = "List of prompts:"
+            messageText = "List of prompts:\n"
             index = 1
             for prompt in promptsList:
                 userObject = await self.bot.get_user_info(prompt['author'])
-                messageText = messageText + "\n" + str(index) + ". " + userObject.name + ": " + prompt['prompt']
+                messageText += str(index) + ". " + userObject.name + ": " + prompt['prompt'] + "\n"
                 index += 1
-            await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
-
+                if index % 5 == 0:
+                    await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
+                    messageText = "";
+            if index % 5 != 0:
+                await self.bot.send_message(ctx.message.author, content=messageText, tts=False, embed=None)
     @checks.admin()
     @commands.command(pass_context=True, no_pm=True)
     async def deleteprompt(self, ctx, num):
@@ -547,7 +560,7 @@ class ComposePrompt:
             await self.bot.say(message)    
 
     @checks.admin()
-    @commands.command(pass_context=True, no_pm=True)	
+    @commands.command(pass_context=True, no_pm=True)    
     async def promptoff(self, ctx):
         """Turn prompt mode off for this server"""
         serverID = ctx.message.server.id
@@ -851,9 +864,6 @@ class ComposePrompt:
         continueChecking = True;
         #continue this loop indefinitely
         while(continueChecking):
-            #if not os.path.exists(dataPath + "/itworked.txt"):
-            #    os.makedirs(dataPath + "/itworked.txt")
-            #print("In while loop")
             with open(dataPath + '/globalsettings.txt', 'r') as file:
                 servers = json.load(file)
                 servers = servers["globalsettings"]["nextpromptreset"]
@@ -869,23 +879,36 @@ class ComposePrompt:
         
             #wait, and then do it all again
             time.sleep(waitTime)
-    
+   
     #print out existing entries (if they exist) and choose a new one. Return false if the instance of periodicCheck() that called it is duplicate. Returns True 
     #otherwise.
-    async def promptRestart(self, serverID):       
+    async def promptRestart(self, serverID):    
         serverIDPath = dataPath + "/" + serverID
         channel = -1
-        prompts = []
+        prompts = {}
         priPrompts = []
-        promptToUse = {}
+        promptsToUse = {}
         newPrompt = {}
+        canidatePrompts = []
+        channelObject = None
+        prompts = {}
+        
+        #if this bot isn't even logged in yet, don't bother
+        if not self.bot.is_logged_in:
+            return True
         
         #see if busy file exists for this server. If so, promptRestart is already running and this instance should abort
-        if os.path.isfile(serverIDPath + busyFile):
-            print("crap, promptRestart is already running!")
+        if os.path.isdir(serverIDPath + busyFile):
+            print("Crap, promptRestart is already running!")
             return False
         else:
             os.makedirs(serverIDPath + busyFile)
+        
+        if not os.path.isfile(serverIDPath + '/settings.txt'):
+            #remove busyfile        
+            if os.path.isdir(serverIDPath + busyFile):
+                shutil.rmtree(serverIDPath + busyFile)
+            return True
         
         #get settings information from JSON file
         with open(serverIDPath + '/settings.txt', 'r') as file:
@@ -893,9 +916,11 @@ class ComposePrompt:
                 settings = json.load(file)
                 settings = settings['settings']
             except ValueError:
+                print("could not get settings from global settings")
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from globalsettings.txt JSON file!")
                 return True
        
+        print("checking if promptrun is in settings")
         #check to see if composeprompt is supposed to be running in this server
         if "promptrun" in settings:
             if settings["promptrun"] is False:
@@ -904,23 +929,31 @@ class ComposePrompt:
             return True     
        
         #if it gets to this point, then it is supposed to be running this this server
-       
-
-            
+      
         #get which channel composeprompt should run in for this server
         if "channel" in settings:
             channel = settings["channel"]
+            channelObject = self.bot.get_channel(settings["channel"])
         else:
             channel = self.bot.get_server(serverID)
+            channelObject = channel
             await self.bot.send_message(channel, 'Error. Bot does not have channel to run in. Using default channel')    
-        
+     
         with open(serverIDPath + '/entries.txt', 'r') as file:    
             try:
                 entries = json.load(file)
             except ValueError:
                 await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from entires.txt JSON file!")
                 return True
-        
+                
+        #get prompts from file
+        with open(serverIDPath + '/prompts.txt', 'r') as file:
+            try:
+                prompts = json.load(file)
+            except ValueError:
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                return True
+       
         #get if there was a prompt for the previous week. If so, show it and what was submitted last week.
         if "prompt" in settings:
             userMention = await self.bot.get_user_info(settings["prompt"]["author"])  
@@ -942,9 +975,7 @@ class ComposePrompt:
             else:
                 #state that there were no entries
                 await self.bot.send_message(self.bot.get_channel(channel), warning('There were no submitted entries this week. Gosh darn it!'))
-                
-        
-        # print("See if there are any priority prompts")
+               
         #see if there are any priority prompts
         with open(serverIDPath + '/priorityprompts.txt', 'r') as file:    
             try:
@@ -954,79 +985,156 @@ class ComposePrompt:
                 return True
         
         #see if priority list is empty. If it has stuff in it, use that first. Else, use regular prompts
+        
         if len(priPrompts["priprompts"]) > 0:
-            # print("Getting priority prompt!")
-            promptToUse = priPrompts["priprompts"][0]
+            promptsToUse = priPrompts["priprompts"][0]
             priPrompts["priprompts"].pop(0)
 
             with open(serverIDPath + '/priorityprompts.txt', 'w+') as file:
                 json.dump({"priprompts": priPrompts["priprompts"]}, file, indent=4)
               
-        else:
-            prompts = {}
-            #get new prompt from regular prompts
-            # print("Getting regular prompt")
-            with open(serverIDPath + '/prompts.txt', 'r') as file:
+        else:  #use regular prompts     
+            #see if candidate exist if so, choose winner. Otherwise, randomly choose a prompt from all available prompts           
+            candidatePrompts = [];
+            settings = {}
+            with open(serverIDPath + '/settings.txt', 'r') as file:
                 try:
-                    prompts = json.load(file)
-                    # print("Got prompts from JSON file")
+                    settings = json.load(file)
                 except ValueError:
-                    await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                    await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from settigns.txt JSON file!")
+                    return True
+                     
+            #see if there are condidate prompts
+            if 'candidateprompts' in settings['settings']:
+                #see which prompt has the most votes on it.  
+                topReacted = settings['settings']['candidateprompts']
+                highestNum = 0;
+                authors = []
+                server = self.bot.get_server(serverID)
+                for candidatePrompt in settings['settings']['candidateprompts']:
+                    channelObject = server.get_channel(settings['settings']["channel"])  
+                    candidateMessage = await self.bot.get_message(channelObject, candidatePrompt['id'])
+
+                    #count the number of stars on each reaction
+                    for reaction in candidateMessage.reactions:
+                        if(type(reaction.emoji) is str and str(ord(reaction.emoji[0])) == str(likeEmoji) and reaction.count >= highestNum):                          
+                            if reaction.count > highestNum:
+                                topReacted = []
+                            highestNum = reaction.count
+                            topReacted.append(candidatePrompt)
+                    
+                promptsToUse = topReacted[randint(0, len(topReacted) - 1)]               
+            else:             
+                if len(prompts["prompts"]) >= minPrompts:
+                    #randomly choose a new prompt to set for this week's prompt
+                    #ensure the chosen prompt is placed at the front of the list
+                    #do not consider last week's chosen prompt for this week
+                    index = randint(1, len(prompts["prompts"]) - 1)
+                    promptsToUse = prompts["prompts"][index]
+                    prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
+                    settings["prompt"] = promptsToUse
+                    
+                else:
+                    promptsToUse["prompt"] = "There are not enough prompts. Please submit some!"
+                    promptsToUse["author"] = self.bot.user.id
+                    settings.pop("prompt", None)
+     
+            try:
+                promptToRemove = promptsToUse
+                promptToRemove.pop("id", None)
+                prompts["prompts"].remove(promptToRemove)
+            except Exception as e:
+                print("Exception:")
+                print(str(e))
+       
+            with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
+                json.dump({'prompts': prompts["prompts"]}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
+
+        #print out new prompt
+        userMention = await self.bot.get_user_info(promptsToUse["author"])       
+        await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptsToUse["prompt"]) + "Submitted by " + userMention.mention)     
+
+        if(len(priPrompts["priprompts"]) <= 0):
+            settings = {}
+            with open(serverIDPath + '/settings.txt', 'r') as file:
+                try:
+                    settings = json.load(file)
+                except ValueError:
+                    print("couldn't write settings!")
+                    await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from settings.txt JSON file!")
+                    return True
+        
+            #if there are enough promtps, choose 5 canidate prompts
+            print(str(len(prompts["prompts"])) + " " + str(minPrompts))
+            if len(prompts["prompts"]) >= minPrompts:
+                #choose 5 more prompts
+                index = randint(0, len(prompts["prompts"]) - 1)
+                await self.bot.send_message(self.bot.get_channel(channel), bold("This week's canidate prompts"))
+            
+                for i in range(1, 6):
+                    canidatePrompts.append(prompts["prompts"][(index + i) % len(prompts["prompts"])])
+                    message = await self.bot.send_message(self.bot.get_channel(channel), box(canidatePrompts[i-1]["prompt"]))
+                    canidatePrompts[i-1]["id"] = message.id
+                    
+                await self.bot.send_message(self.bot.get_channel(channel), bold("Please vote for the prompt you'd like to do next week by reacting to it with a " +  str(chr(likeEmoji)) + "!"))
+                #re-write settings              
+                settings['settings']['candidateprompts'] = canidatePrompts;               
+            else:
+                #at this point, you are running out of prompts
+                await self.bot.send_message(self.bot.get_channel(channel), bold("No canidate prompts for this week. Please submit some ideas for new ones."))
+                settings['settings'].pop('candidateprompts', None)
+            
+            #set new prompt and re-write settings
+            settings['settings']['prompt'] = promptsToUse
+            with open(serverIDPath + '/settings.txt', 'w+') as file: 
+                json.dump({'settings': settings['settings']}, file, indent=4)
+        else:
+            await self.bot.send_message(self.bot.get_channel(channel), "Next week's prompt has already been decided...");
+            
+            #re-write settings to remove canidateprompts...since there are none
+            settings = {}
+            with open(serverIDPath + '/settings.txt', 'r') as file:
+                try:
+                    settings = json.load(file)
+                except ValueError:
+                    print("Had trouble writing to settings!")
+                    await self.bot.say("ERROR: Composeprompt: promptRestart: Could not write data to settings.txt JSON file!")
                     return True
             
-            if len(prompts["prompts"]) >= minPrompts:
-                #randomly choose a new prompt to set for this week's prompt
-                #ensure the chosen prompt is placed at the front of the list
-                #do not consider last week's chosen prompt for this week
-                index = randint(1, len(prompts["prompts"]) - 1)
-                promptToUse = prompts["prompts"][index]
-                prompts["prompts"][index], prompts["prompts"][0] = prompts["prompts"][0], prompts["prompts"][index] #swap prompts
-                settings["prompt"] = promptToUse
-                
-                with open(serverIDPath + '/prompts.txt', 'w+') as promptFile:
-                    json.dump({'prompts': prompts["prompts"]}, promptFile, indent=4)  # rewrite prompts.txt with updated list of prompts
-
-            else:
-                promptToUse["prompt"] = "There are not enough prompts. Please submit some!"
-                promptToUse["author"] = self.bot.user.id
-                settings.pop("prompt", None)
-
+            settings['settings'].pop('candidateprompts', None)
+            settings['settings']['prompt'] = promptsToUse
+            
             with open(serverIDPath + '/settings.txt', 'w+') as file: 
-                json.dump({'settings': settings}, file, indent=4)
-        
-        #print out new prompt
-        userMention = await self.bot.get_user_info(promptToUse["author"])       
-        await self.bot.send_message(self.bot.get_channel(channel), bold("This week's prompt:\n") + box(promptToUse["prompt"]) + "Submitted by " + userMention.mention)
-           
+                json.dump({'settings': settings['settings']}, file, indent=4)
+              
         #restart prompt timer 
         with open(dataPath + '/globalsettings.txt', 'r') as file:  
             try:
                 globalSettings = json.load(file)
             except ValueError:
-                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from prompts.txt JSON file!")
+                await self.bot.say("ERROR: Composeprompt: promptRestart: Could not get data from globalsettings.txt JSON file!")
+                print("globalsettings not working")
                 return True
-        
-        isInList = False
-        
+
+        isInList = False     
         for x in globalSettings["globalsettings"]["promptstarttimes"]:
             if x == serverID:
                 isInList = True
-                break;
-        
+                break
+
         #record new time and start new timer
         if isInList:
             newTimeStruct = self.convertToStructTime(globalSettings["globalsettings"]["promptstarttimes"][serverID])
             globalSettings["globalsettings"]["nextpromptreset"][serverID] = [newTimeStruct.year, newTimeStruct.month, newTimeStruct.day, newTimeStruct.hour, newTimeStruct.minute]
         
             with open(dataPath + "/globalsettings.txt", "w+") as settingsFile:
-                json.dump(globalSettings, settingsFile, indent=4) 
-                #print("reset new time to", globalSettings["globalsettings"]["nextpromptreset"][serverID])
+                json.dump(globalSettings, settingsFile, indent=4)
         
-        #remove busyfile        
-        if os.path.exists(serverIDPath + busyFile):
+        #remove busyfile   
+        if os.path.isdir(serverIDPath + busyFile):
             shutil.rmtree(serverIDPath + busyFile)
             
         return True
-        
+
 def setup(bot):
     bot.add_cog(ComposePrompt(bot))
